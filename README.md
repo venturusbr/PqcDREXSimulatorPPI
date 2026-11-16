@@ -39,7 +39,7 @@ java -jar core/target/drexsim.jar setup-demo
 java -jar core/target/drexsim.jar balances --watch 2
 ```
 
-`setup-demo` creates BCB, two banks with their reserves and Real Tokenizado (BRLA, BRLB) and three clients, each actor signing with a different DSA (`MLDSA44`, `MLDSA87`, `FALCON512`, both hybrids, and standard ECDSA for one bank as the classical baseline). It then mints Real Digital through STR, deposits client funds, freezes part of a balance and settles one inter-bank payment. Every transaction is printed with its type, signature and key sizes and gas limit.
+`setup-demo` creates BCB, two banks with their reserves and Real Tokenizado (BRLA, BRLB) and three clients, each actor signing with a different DSA (`MLDSA44`, `MLDSA87`, `FALCON512`, both hybrids, and standard ECDSA for one bank as the classical baseline). It then mints Real Digital through STR, deposits client funds, freezes part of a balance, and runs payments in which every client signs: two inter-bank swaps and one transfer inside Banco A. Every transaction is printed with its type, signature and key sizes and gas limit.
 
 Other commands: `accounts list`, `accounts new <name> --dsa <DSA> [--standard]`, `deploy`. Run `java -jar core/target/drexsim.jar <command> --help` for details. Accounts and contract addresses are kept in `simulator-data/` (`--data-dir`); the keys there are **test keys in plain text**.
 
@@ -48,18 +48,23 @@ Other commands: `accounts list`, `accounts new <name> --dsa <DSA> [--standard]`,
 `drexsim balances` shows, for every wallet, its Real Digital (RD) and Real Tokenizado (RT) balance, with any frozen part, read at a single block so the figures are consistent. The last two rows compare the sum of the wallets shown with the total supply on chain.
 
 ```text
-Balances at block 50 (2026-11-16 15:15:40), amounts in R$
+Balances at block 192 (2026-11-16 16:19:52), amounts in R$
 Wallet                | Signs with          | Address        | RD (BRL)     | RT BRLA                  | RT BRLB
 ----------------------+---------------------+----------------+--------------+--------------------------+---------
-reserve-a             | SECP256K1-FALCON512 | 0xd99bcb..fa69 |   998.765,44 |                     0,00 |     0,00
-reserve-b             | SECP256K1 (std)     | 0x3547e3..5240 | 1.001.234,56 |                     0,00 |     0,00
-client-a1             | SECP256K1-MLDSA44   | 0xa357d0..5e48 |         0,00 |                 8.765,44 |     0,00
-client-a2             | MLDSA87             | 0xf7af7d..e70f |         0,00 | 2.500,00 (frozen 500,00) |     0,00
-client-b1             | FALCON512           | 0x1124e1..d4c2 |         0,00 |                     0,00 | 8.234,56
-...
+bcb                   | SECP256K1-MLDSA44   | 0x5ef8e8..b9fa |         0,00 |                     0,00 |     0,00
+bank-a                | MLDSA44             | 0x8c86a7..048f |    50.000,00 |                     0,00 |     0,00
+reserve-a             | SECP256K1-FALCON512 | 0xc256cb..4b2b |   998.865,44 |                     0,00 |     0,00
+bank-b                | SECP256K1 (std)     | 0xc5f1c4..9321 |         0,00 |                     0,00 |     0,00
+reserve-b             | SECP256K1 (std)     | 0x86f3b8..e825 | 1.001.134,56 |                     0,00 |     0,00
+client-a1             | SECP256K1-MLDSA44   | 0x0719c2..36fa |         0,00 |                 9.165,44 |     0,00
+client-a2             | MLDSA87             | 0xd9da58..7f5a |         0,00 | 2.200,00 (frozen 500,00) |     0,00
+client-b1             | FALCON512           | 0xaa9d5e..de88 |         0,00 |                     0,00 | 8.134,56
+----------------------+---------------------+----------------+--------------+--------------------------+---------
+Sum of wallets shown  |                     |                | 2.050.000,00 |                11.365,44 | 8.134,56
+Total supply on chain |                     |                | 2.050.000,00 |                11.365,44 | 8.134,56
 ```
 
-Options: `--account <name>` (repeatable), `--address <0x..>` for wallets created elsewhere, `--hide-empty`, `--watch <seconds>`, and `--json` for the raw snapshot. The same data comes from `BalanceService` for other front-ends.
+Options: `--account <name>` (repeatable), `--address <0x..>` for wallets created elsewhere, `--hide-empty`, `--watch <seconds>`, and `--json` for the raw snapshot (amounts in cents, with `balance`, `frozen` and `available`). The same data comes from `BalanceService` for other front-ends.
 
 ### Tests
 

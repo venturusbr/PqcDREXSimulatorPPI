@@ -160,6 +160,12 @@ public final class DrexClient {
     return realTokenizado(symbol, authority).increaseFrozenBalance(wallet.address(), amount).send();
   }
 
+  /** Flow 11: transfer between clients of the same bank (only Real Tokenizado moves). */
+  public TransactionReceipt transfer(Account from, String symbol, String to, BigInteger amount) throws Exception {
+    log.accept("Transfer " + Amounts.format(amount) + " " + symbol + " from " + from.name());
+    return realTokenizado(symbol, from).transfer(to, amount).send();
+  }
+
   /** Flow 12: inter-bank client payment in one step through SwapOneStep. */
   public TransactionReceipt payOneStep(Account payer, String fromSymbol, String toSymbol, String receiver, BigInteger amount)
       throws Exception {

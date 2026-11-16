@@ -99,6 +99,12 @@ public final class DemoSetup {
     log.accept("== Flow 12: client-a1 (Banco A) pays client-b1 (Banco B)");
     drex.payOneStep(clientA1, "BRLA", "BRLB", clientB1.address(), Amounts.parse("1.234,56"));
 
+    log.accept("== Flow 11: client-a2 pays client-a1, both at Banco A (only the unfrozen part can move)");
+    drex.transfer(clientA2, "BRLA", clientA1.address(), Amounts.parse("300,00"));
+
+    log.accept("== Flow 12: client-b1 (Banco B) pays client-a1 (Banco A)");
+    drex.payOneStep(clientB1, "BRLB", "BRLA", clientA1.address(), Amounts.parse("100,00"));
+
     deployment.save(dataDir);
     return deployment;
   }

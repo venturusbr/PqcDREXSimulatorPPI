@@ -44,8 +44,10 @@ echo "Copying $BESU_QBFT_DIR to $WORK_DIR"
 if [ -f "$WORK_DIR/docker-compose.generated.yaml" ]; then
     (cd "$WORK_DIR" && docker compose -f docker-compose.generated.yaml down 2>/dev/null) || true
 fi
-rm -rf "$WORK_DIR"
+# Empty the directory rather than deleting it: on Windows a directory that is some process's
+# working directory cannot be removed.
 mkdir -p "$WORK_DIR"
+find "$WORK_DIR" -mindepth 1 -delete
 # Only the tracked files: no node data or generated files of a previous network.
 (cd "$BESU_QBFT_DIR" && git ls-files -z | xargs -0 -I{} cp --parents {} "$WORK_DIR/")
 chmod +x "$WORK_DIR/init-qbft.sh"

@@ -42,13 +42,13 @@ class DemoNetworkTest {
       Snapshot s = new BalanceService(chain, deployment).snapshot(wallets);
       System.out.print(BalanceTable.render(s, false));
 
-      assertEquals("998.765,44", rd(s, "reserve-a"));
-      assertEquals("1.001.234,56", rd(s, "reserve-b"));
+      assertEquals("998.865,44", rd(s, "reserve-a"));
+      assertEquals("1.001.134,56", rd(s, "reserve-b"));
       assertEquals("50.000,00", rd(s, "bank-a"));
-      assertEquals("8.765,44", rt(s, "client-a1", "BRLA"));
-      assertEquals("2.500,00", rt(s, "client-a2", "BRLA"));
+      assertEquals("9.165,44", rt(s, "client-a1", "BRLA"));
+      assertEquals("2.200,00", rt(s, "client-a2", "BRLA"));
       assertEquals("500,00", Amounts.format(row(s, "client-a2").of("BRLA").frozen()));
-      assertEquals("8.234,56", rt(s, "client-b1", "BRLB"));
+      assertEquals("8.134,56", rt(s, "client-b1", "BRLB"));
 
       // Every DSA of the demo really went on chain.
       Set<String> signers = sent.stream().filter(SentTransaction::accepted)

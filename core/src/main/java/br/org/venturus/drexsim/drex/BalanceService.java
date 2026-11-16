@@ -2,6 +2,7 @@ package br.org.venturus.drexsim.drex;
 
 import br.org.venturus.drexsim.chain.Chain;
 import br.org.venturus.drexsim.contracts.RealDigital;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.math.BigInteger;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -28,10 +29,12 @@ public final class BalanceService {
   public record Holding(BigInteger balance, BigInteger frozen) {
     public static final Holding ZERO = new Holding(BigInteger.ZERO, BigInteger.ZERO);
 
+    @com.fasterxml.jackson.annotation.JsonProperty("available")
     public BigInteger available() {
       return balance.subtract(frozen).max(BigInteger.ZERO);
     }
 
+    @JsonIgnore
     public boolean isZero() {
       return balance.signum() == 0 && frozen.signum() == 0;
     }
@@ -41,10 +44,12 @@ public final class BalanceService {
   public record Token(String symbol, String name, String address) {}
 
   public record WalletBalances(Wallet wallet, Map<String, Holding> holdings) {
+    @JsonIgnore
     public Holding of(String symbol) {
       return holdings.getOrDefault(symbol, Holding.ZERO);
     }
 
+    @JsonIgnore
     public boolean isEmpty() {
       return holdings.values().stream().allMatch(Holding::isZero);
     }

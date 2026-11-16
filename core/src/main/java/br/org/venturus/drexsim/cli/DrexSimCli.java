@@ -235,7 +235,8 @@ public final class DrexSimCli {
             store.byAddress(address).map(Account::name).orElse("(external)"), address.toLowerCase(), ""));
       }
 
-      ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule()).enable(SerializationFeature.INDENT_OUTPUT);
+      ObjectMapper mapper = new ObjectMapper().registerModule(new JavaTimeModule())
+          .enable(SerializationFeature.INDENT_OUTPUT).disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
       try (Chain chain = new Chain(root.rpc)) {
         BalanceService service = new BalanceService(chain, root.deployment());
         while (true) {
