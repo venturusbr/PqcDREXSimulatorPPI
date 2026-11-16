@@ -2,6 +2,83 @@
 
 A front-end and smart contracts that reproduce Brazil's Real Digital (Drex) pilot operations, running on a Besu PQC network modified to accept post-quantum (PQC) and hybrid signatures.
 
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| [contracts/](contracts) | Hardhat project: the Drex contracts (pinned copy, OpenZeppelin 4.9.6), functional tests on the standard EVM, and the ABI/bytecode exported to `contracts/build/` for the Java core |
+| [core/](core) | Java 21 library and `drexsim` CLI: signs transactions with every DSA of besu-pqc-ppi, deploys and drives the Drex contracts, shows RD/RT balances |
+| [infra/](infra) | Starts a besu-pqc-ppi QBFT network through besu-qbft, with every account DSA enabled |
+| [docs/](docs) | Contracts reference and use-case flows |
+
+## Requirements
+
+- Java 21 and Maven 3.9
+- Node.js 18+ (only to change or test the contracts; the Java build uses the committed `contracts/build/`)
+- Docker, a besu-pqc-ppi image and a [besu-qbft](https://github.com/venturusbr/besu-qbft) checkout next to this repository, to run a network
+
+## Quick start
+
+Build and run the unit tests:
+
+```sh
+mvn clean package
+```
+
+Start a four-validator network whose validators sign with SECP256K1-MLDSA44:
+
+```sh
+infra/start-network.sh hyperledger/besu:26.1.0-pqc --node-dsa=SECP256K1-MLDSA44 --nodes=4
+```
+
+In another terminal, check the node, build a demo Drex network and look at the balances:
+
+```sh
+java -jar core/target/drexsim.jar network
+java -jar core/target/drexsim.jar setup-demo
+java -jar core/target/drexsim.jar balances --watch 2
+```
+
+`setup-demo` creates BCB, two banks with their reserves and Real Tokenizado (BRLA, BRLB) and three clients, each actor signing with a different DSA (`MLDSA44`, `MLDSA87`, `FALCON512`, both hybrids, and standard ECDSA for one bank as the classical baseline). It then mints Real Digital through STR, deposits client funds, freezes part of a balance and settles one inter-bank payment. Every transaction is printed with its type, signature and key sizes and gas limit.
+
+Other commands: `accounts list`, `accounts new <name> --dsa <DSA> [--standard]`, `deploy`. Run `java -jar core/target/drexsim.jar <command> --help` for details. Accounts and contract addresses are kept in `simulator-data/` (`--data-dir`); the keys there are **test keys in plain text**.
+
+### Balance viewer
+
+`drexsim balances` shows, for every wallet, its Real Digital (RD) and Real Tokenizado (RT) balance, with any frozen part, read at a single block so the figures are consistent. The last two rows compare the sum of the wallets shown with the total supply on chain.
+
+```text
+Balances at block 50 (2026-11-16 15:15:40), amounts in R$
+Wallet                | Signs with          | Address        | RD (BRL)     | RT BRLA                  | RT BRLB
+----------------------+---------------------+----------------+--------------+--------------------------+---------
+reserve-a             | SECP256K1-FALCON512 | 0xd99bcb..fa69 |   998.765,44 |                     0,00 |     0,00
+reserve-b             | SECP256K1 (std)     | 0x3547e3..5240 | 1.001.234,56 |                     0,00 |     0,00
+client-a1             | SECP256K1-MLDSA44   | 0xa357d0..5e48 |         0,00 |                 8.765,44 |     0,00
+client-a2             | MLDSA87             | 0xf7af7d..e70f |         0,00 | 2.500,00 (frozen 500,00) |     0,00
+client-b1             | FALCON512           | 0x1124e1..d4c2 |         0,00 |                     0,00 | 8.234,56
+...
+```
+
+Options: `--account <name>` (repeatable), `--address <0x..>` for wallets created elsewhere, `--hide-empty`, `--watch <seconds>`, and `--json` for the raw snapshot. The same data comes from `BalanceService` for other front-ends.
+
+### Tests
+
+```sh
+mvn test                                         # unit tests, no network needed
+mvn test -Ddrexsim.rpc=http://localhost:8545     # also runs the demo end to end on a live network
+cd contracts && npm install && npm test          # contract tests on the Hardhat network
+```
+
+The signer is checked byte for byte against transactions produced by [besu-flex-wallet-ppi](https://github.com/venturusbr/besu-flex-wallet-ppi), which besu-pqc-ppi accepts.
+
+## How transactions are signed
+
+besu-pqc-ppi has no `eth_sendTransaction` for post-quantum accounts, so the core signs every transaction itself and sends it with `eth_sendRawTransaction`. The generated web3j contract wrappers go through `PqcTransactionManager`, which:
+
+- encodes a flexible EIP-1559 transaction (`0x42`) for any DSA, or a standard one (`0x02`) for classical accounts;
+- keeps a nonce counter per account;
+- sets the gas limit from `eth_estimateGas` plus the extra base cost of the DSA, which the estimate leaves out (65 102 gas for SECP256K1-MLDSA44, for instance), plus a 20% margin.
+
 ## Smart contracts
 
 The contracts come from [wireshape/real-digital-smart-contracts](https://github.com/wireshape/real-digital-smart-contracts), a Wire Labs reconstruction of the Real Digital pilot contracts based on the ABIs released by Banco Central do Brasil. It is not the official BCB implementation.

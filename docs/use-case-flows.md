@@ -301,7 +301,7 @@ sequenceDiagram
 |---|---|---|
 | 1 | client X | `KeyDictionary.getWallet(bytes32 keyY)` → `address walletY` |
 | 2 | client X | `RealTokenizadoA.approve(address swapTwoSteps, uint256 amount)` → `bool` |
-| 3 | client X | `SwapTwoSteps.startSwap(address realTokenizadoA, address realTokenizadoB, address walletY, uint256 amount)` → read `uint256 proposalId` from the `SwapStarted` event (the function returns nothing) |
+| 3 | client X | `SwapTwoSteps.startSwap(address realTokenizadoA, address realTokenizadoB, address walletY, uint256 amount)` → read `uint256 proposalId` from the `SwapStarted` event (the function returns nothing; ids start at 1) |
 | 4a | client Y | `SwapTwoSteps.executeSwap(uint256 proposalId)` — accepts and settles |
 | 4b | client X or Y | `SwapTwoSteps.cancelSwap(uint256 proposalId, string reason)` — cancels |
 | check | anyone | `SwapTwoSteps.swapProposals(uint256 proposalId)` → tuple below |
@@ -357,6 +357,8 @@ Moves or destroys a wallet's balance without its signature (e.g. a court order).
 | Forced redemption | `MOVER_ROLE` | `Token.moveAndBurn(address from, uint256 amount)` |
 
 If the balance is frozen, unfreeze it first (flow 15): the frozen-balance check also applies here.
+
+Forced redemption needs a one-time setup: the token contract's own address must be enabled in its allow-list, because `moveAndBurn` burns from the contract. Run `Token.enableAccount(address token)` once (ACCESS_ROLE), otherwise `moveAndBurn` reverts with `Sender is not enabled`. Option B of flow 10 has the same requirement.
 
 ---
 

@@ -1,0 +1,5 @@
+target/
+simulator-data/
+*.iml
+.idea/
+.vscode/
