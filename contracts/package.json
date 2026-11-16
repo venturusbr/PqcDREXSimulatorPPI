@@ -1,6 +1,7 @@
 {
   "name": "pqc-drex-contracts",
   "private": true,
+  "license": "(Apache-2.0 AND MIT)",
   "description": "Real Digital (Drex) pilot contracts compiled and tested for the PQC DREX simulator",
   "scripts": {
     "compile": "hardhat compile",

@@ -105,3 +105,7 @@ The contracts come from [wireshape/real-digital-smart-contracts](https://github.
 
 - [Contracts reference](docs/contracts-reference.md): what each contract does, its functions, roles, required setup and known caveats.
 - [Use case flows](docs/use-case-flows.md): which contracts and functions to call, in which order and by which wallet, for each use case (network setup, onboarding, minting, transfers, swaps, freezing, pausing), with argument types.
+
+## License
+
+Licensed under the [Apache License 2.0](LICENSE). The Drex contracts in [contracts/contracts/drex/](contracts/contracts/drex) keep their original [MIT License](contracts/contracts/drex/LICENSE) (Copyright (c) 2023 Wireshape). See [NOTICE](NOTICE) for attributions.
