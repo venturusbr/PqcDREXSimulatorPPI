@@ -46,7 +46,7 @@ graph TD
 | **BCB authority** | Wallet passed as `_authority` to `RealDigital`. Holds ACCESS, MINTER, BURNER, MOVER and FREEZER roles. |
 | **BCB admin** | Wallet passed as `_admin`. Holds `DEFAULT_ADMIN_ROLE` (grants/revokes roles) and `PAUSER_ROLE`. |
 | **Participant** | Financial institution. Its wallet is enabled in `RealDigital`. Identified by its CNPJ8 (first 8 digits of the CNPJ). |
-| **Reserve wallet** | Participant wallet holding the Real Digital that backs its Real Tokenizado. Stored in `RealTokenizado.reserve`. |
+| **Reserve wallet** | Participant wallet holding the Real Digital used to settle its clients' inter-bank swaps. Stored in `RealTokenizado.reserve`. Not to be confused with the bank reserves at BCB (off-chain) used by STR. |
 | **Client** | End user of a participant. Holds Real Tokenizado of that participant. |
 
 ### Units
@@ -151,10 +151,10 @@ Constructor: `RealTokenizado(name, symbol, authority, admin, participant, cnpj8,
 |---|---|---|
 | `participant` | view | Participant name. |
 | `cnpj8` | view | First 8 digits of the participant's CNPJ. Used in swap events. |
-| `reserve` | view | Participant wallet that holds the **Real Digital** backing this token. The swaps move Real Digital between reserves. |
+| `reserve` | view | Participant wallet that holds **Real Digital** for settlement. The swaps move Real Digital between the reserves of the two banks. |
 | `updateReserve(newReserve)` | `DEFAULT_ADMIN_ROLE` | Changes the reserve wallet. |
 
-The contract does not enforce that the Real Tokenizado supply is backed by Real Digital in `reserve`. Keeping that parity is up to the participant.
+The contract does not tie the Real Tokenizado supply to the Real Digital in `reserve`: the bank can mint Real Tokenizado without holding any Real Digital. The only on-chain requirement is that `reserve` has enough Real Digital when one of its clients sends a swap to another bank; otherwise the swap reverts.
 
 ---
 

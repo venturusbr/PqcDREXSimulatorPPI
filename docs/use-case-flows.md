@@ -194,7 +194,7 @@ To change the reserve later: token admin calls `RealTokenizado.updateReserve(add
 
 ## 9. Client deposit (issue Real Tokenizado)
 
-Client deposits money at Bank A and receives Real Tokenizado A. To keep the token backed, Bank A's reserve should hold the same amount in Real Digital (not enforced by the contracts).
+Client deposits money at Bank A and receives Real Tokenizado A. The contracts do not require Real Tokenizado to be backed 1:1 by Real Digital. What they do require is that Bank A's `reserve` wallet holds enough Real Digital to settle the outgoing swaps of its clients (flows 12 and 13), so the bank keeps the reserve funded according to its own liquidity policy.
 
 | Step | Wallet | Call |
 |---|---|---|
