@@ -327,6 +327,15 @@ pre.raw {
 .token-tag.none { color: var(--muted); background: var(--surface-2); }
 .rt-line + .rt-line { margin-top: 2px; }
 .balances td.rt .frozen { margin-right: 54px; }
+.subhead { font-size: 13.5px; font-weight: 650; margin: 6px 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.table-wrap + .subhead { margin-top: 22px; }
+.balances-note { margin: 10px 0 0; }
+.segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.segmented button { border: 0; border-radius: 0; background: var(--surface); color: var(--muted); padding: 4px 11px; font-size: 12.5px; font-weight: 550; }
+.segmented button + button { border-left: 1px solid var(--border); }
+.segmented button[aria-checked="true"] { background: var(--accent-soft); color: var(--accent); }
+.segmented button:hover:not([aria-checked="true"]) { color: var(--text); }
+.balances-note:empty { display: none; }
 .wallet-name { display: inline-flex; align-items: center; gap: 8px; }
 .roles { display: inline-flex; gap: 3px; min-width: 20px; }
 .role { display: inline-flex; width: 20px; height: 20px; border-radius: 5px; align-items: center; justify-content: center;

@@ -54,11 +54,24 @@
           <div class="card-head">
             <h2 data-i18n="balances.title"></h2>
             <div class="card-tools">
+              <div class="segmented" id="balances-view" role="radiogroup" aria-label="View" data-i18n-aria-label="balances.view">
+                <button type="button" role="radio" data-view="split" title="Split" data-i18n-title="balances.view.split-hint"
+                  data-i18n="balances.view.split"></button>
+                <button type="button" role="radio" data-view="unified" title="Unified" data-i18n-title="balances.view.unified-hint"
+                  data-i18n="balances.view.unified"></button>
+              </div>
               <label class="toggle"><input type="checkbox" id="hide-empty"> <span data-i18n="balances.hide-empty"></span></label>
               <span class="muted" id="balances-meta"></span>
             </div>
           </div>
-          <div class="table-wrap"><table class="data balances" id="balances"></table></div>
+          <div id="balances-split">
+            <h3 class="subhead"><span data-i18n="balances.participants.title"></span> <span class="small" data-i18n="balances.participants.hint"></span></h3>
+            <div class="table-wrap"><table class="data balances" id="balances-participants"></table></div>
+            <h3 class="subhead"><span data-i18n="balances.clients.title"></span> <span class="small" data-i18n="balances.clients.hint"></span></h3>
+            <div class="table-wrap"><table class="data balances" id="balances-clients"></table></div>
+            <p class="small balances-note" id="balances-note"></p>
+          </div>
+          <div class="table-wrap hidden" id="balances-unified-wrap"><table class="data balances" id="balances-unified"></table></div>
           <p class="legend">
             <span class="badge pq" data-i18n="family.pq"></span>
             <span class="badge hybrid" data-i18n="family.hybrid"></span>

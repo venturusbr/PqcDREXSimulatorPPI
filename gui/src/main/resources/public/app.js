@@ -285,8 +285,72 @@ function amountHtml(h, tag = '') {
 const NO_HOLDING = { balance: 0, frozen: 0 };
 const tokenTag = (t) => ` <span class="token-tag" title="${esc(t.name)}">${esc(t.symbol)}</span>`;
 
+const INSTITUTION_ROLES = ['bcb', 'participant', 'reserve'];
+
+/**
+ * Two tables. Participants: wallets the contracts treat as BCB, a participant or a reserve, with their
+ * Real Digital. Clients: wallets enabled in a Real Tokenizado, with their RT. A wallet that is both is in
+ * both. A wallet holding a token outside its role (e.g. RD sent to a client: transfer() checks only the
+ * sender) is also listed where that token is, so each table's sum always matches the supply.
+ */
+// ---- balances view: split (participants and clients) or unified (one table); remembered per browser
+
+const BALANCES_VIEWS = ['split', 'unified'];
+let balancesView = 'split';
+try {
+  const saved = localStorage.getItem('drexsim.balances-view');
+  if (BALANCES_VIEWS.includes(saved)) balancesView = saved;
+} catch (_) { /* storage unavailable */ }
+
 function renderBalances(snap = state.snapshot, prev = null) {
-  const table = $('#balances');
+  $('#balances-split').classList.toggle('hidden', balancesView !== 'split');
+  $('#balances-unified-wrap').classList.toggle('hidden', balancesView !== 'unified');
+  document.querySelectorAll('#balances-view [data-view]').forEach((b) => {
+    b.setAttribute('aria-checked', String(b.dataset.view === balancesView));
+  });
+  if (balancesView === 'unified') renderUnifiedBalances(snap, prev);
+  else renderSplitBalances(snap, prev);
+}
+
+$('#balances-view').addEventListener('click', (e) => {
+  const view = e.target.closest('[data-view]')?.dataset.view;
+  if (!view || view === balancesView) return;
+  balancesView = view;
+  try { localStorage.setItem('drexsim.balances-view', view); } catch (_) { /* storage unavailable */ }
+  renderBalances();
+});
+
+/** Changes between two snapshots of a wallet's holding, for the flash of updated cells. */
+function balanceChanges(prev) {
+  const before = (addr, symbol) => prev?.wallets.find((w) => w.wallet.address === addr)?.holdings[symbol];
+  return (w, symbol) => {
+    const old = before(w.wallet.address, symbol);
+    const h = w.holdings[symbol] || NO_HOLDING;
+    return old && (old.balance !== h.balance || old.frozen !== h.frozen);
+  };
+}
+
+const holdsToken = (w, symbol) => { const h = w.holdings[symbol]; return h && (h.balance || h.frozen); };
+
+/** The RT cell of a wallet: one line per token held, each tagged with its token. */
+function rtCellHtml(w, rts) {
+  const held = rts.filter((t) => holdsToken(w, t.symbol));
+  return held.length
+    ? held.map((t) => `<div class="rt-line">${amountHtml(w.holdings[t.symbol], tokenTag(t))}</div>`).join('')
+    : amountHtml(NO_HOLDING, ' <span class="token-tag none">–</span>');
+}
+
+const walletCellsHtml = (w) => `
+      <td><span class="wallet-name"><span class="roles">${roleIcons(w)}</span>${esc(w.wallet.label)}</span></td>
+      <td>${badge(w.wallet.signing)}</td>
+      <td><span class="addr" data-copy="${esc(w.wallet.address)}">${esc(shortAddr(w.wallet.address))}</span></td>`;
+
+const perTokenHtml = (rts, values) => rts.map((t) => `<div class="rt-line">${money(values[t.symbol] || 0)}${tokenTag(t)}</div>`).join('')
+  || money(0);
+
+/** Every wallet in one table, with its Real Digital and its Real Tokenizado. */
+function renderUnifiedBalances(snap, prev) {
+  const table = $('#balances-unified');
   if (!snap) {
     table.innerHTML = `<tbody><tr class="empty-row"><td>${tr('balances.none-deployed')}</td></tr></tbody>`;
     $('#balances-meta').textContent = '';
@@ -295,41 +359,85 @@ function renderBalances(snap = state.snapshot, prev = null) {
   const hideEmpty = $('#hide-empty').checked;
   const rd = snap.tokens.find((t) => t.symbol === 'BRL');
   const rts = snap.tokens.filter((t) => t.symbol !== 'BRL');
-  const before = (addr, symbol) => prev?.wallets.find((w) => w.wallet.address === addr)?.holdings[symbol];
-  const changed = (w, symbol) => {
-    const old = before(w.wallet.address, symbol);
-    const h = w.holdings[symbol] || NO_HOLDING;
-    return old && (old.balance !== h.balance || old.frozen !== h.frozen);
-  };
-  const holds = (w, symbol) => { const h = w.holdings[symbol]; return h && (h.balance || h.frozen); };
-
+  const changed = balanceChanges(prev);
   let rdSum = 0;
   const rtSums = Object.fromEntries(rts.map((t) => [t.symbol, 0]));
   const rows = snap.wallets
-    .filter((w) => !hideEmpty || snap.tokens.some((t) => holds(w, t.symbol)))
+    .filter((w) => !hideEmpty || snap.tokens.some((t) => holdsToken(w, t.symbol)))
     .map((w) => {
       const h = w.holdings.BRL || NO_HOLDING;
       rdSum += Number(h.balance);
-      const held = rts.filter((t) => holds(w, t.symbol));
-      held.forEach((t) => { rtSums[t.symbol] += Number(w.holdings[t.symbol].balance); });
-      const rtCell = held.length
-        ? held.map((t) => `<div class="rt-line">${amountHtml(w.holdings[t.symbol], tokenTag(t))}</div>`).join('')
-        : amountHtml(NO_HOLDING, ' <span class="token-tag none">–</span>');
-      return `<tr>
-        <td><span class="wallet-name"><span class="roles">${roleIcons(w)}</span>${esc(w.wallet.label)}</span></td>
-        <td>${badge(w.wallet.signing)}</td>
-        <td><span class="addr" data-copy="${esc(w.wallet.address)}">${esc(shortAddr(w.wallet.address))}</span></td>
+      rts.filter((t) => holdsToken(w, t.symbol)).forEach((t) => { rtSums[t.symbol] += Number(w.holdings[t.symbol].balance); });
+      return `<tr>${walletCellsHtml(w)}
         <td class="num ${changed(w, 'BRL') ? 'flash' : ''}">${amountHtml(h)}</td>
-        <td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCell}</td>
-      </tr>`;
+        <td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
     }).join('');
-  const perToken = (values) => rts.map((t) => `<div class="rt-line">${money(values[t.symbol] || 0)}${tokenTag(t)}</div>`).join('')
-    || money(0);
   table.innerHTML = `<thead><tr><th>${tr('balances.wallet')}</th><th>${tr('common.signs-with')}</th><th>${tr('common.address')}</th>
       <th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th><th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
     <tbody>${rows || `<tr class="empty-row"><td colspan="5">${tr('balances.empty')}</td></tr>`}</tbody>
-    <tfoot><tr><td colspan="3">${tr('balances.sum')}</td><td class="num">${money(rdSum)}</td><td class="num rt">${perToken(rtSums)}</td></tr>
-    <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td><td class="num rt">${perToken(snap.totalSupply)}</td></tr></tfoot>`;
+    <tfoot><tr><td colspan="3">${tr('balances.sum')}</td><td class="num">${money(rdSum)}</td><td class="num rt">${perTokenHtml(rts, rtSums)}</td></tr>
+    <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td>
+      <td class="num rt">${perTokenHtml(rts, snap.totalSupply)}</td></tr></tfoot>`;
+  $('#balances-meta').textContent = tr('common.block-number', { n: snap.blockNumber });
+}
+
+function renderSplitBalances(snap, prev) {
+  const participants = $('#balances-participants');
+  const clients = $('#balances-clients');
+  const note = $('#balances-note');
+  if (!snap) {
+    const empty = `<tbody><tr class="empty-row"><td>${tr('balances.none-deployed')}</td></tr></tbody>`;
+    participants.innerHTML = empty;
+    clients.innerHTML = empty;
+    note.textContent = '';
+    $('#balances-meta').textContent = '';
+    return;
+  }
+  const hideEmpty = $('#hide-empty').checked;
+  const rd = snap.tokens.find((t) => t.symbol === 'BRL');
+  const rts = snap.tokens.filter((t) => t.symbol !== 'BRL');
+  const changed = balanceChanges(prev);
+  const holds = holdsToken;
+  const roles = (w) => w.roles?.roles || [];
+  const holdsRt = (w) => rts.some((t) => holds(w, t.symbol));
+  const isParticipant = (w) => roles(w).some((r) => INSTITUTION_ROLES.includes(r)) || holds(w, 'BRL');
+  const isClient = (w) => roles(w).includes('client') || holdsRt(w);
+  const walletCells = walletCellsHtml;
+
+  // Participants: Real Digital.
+  let rdSum = 0;
+  const participantRows = snap.wallets.filter(isParticipant)
+    .filter((w) => !hideEmpty || holds(w, 'BRL'))
+    .map((w) => {
+      const h = w.holdings.BRL || NO_HOLDING;
+      rdSum += Number(h.balance);
+      return `<tr>${walletCells(w)}<td class="num ${changed(w, 'BRL') ? 'flash' : ''}">${amountHtml(h)}</td></tr>`;
+    }).join('');
+  participants.innerHTML = `<thead><tr><th>${tr('balances.participant')}</th><th>${tr('common.signs-with')}</th>
+      <th>${tr('common.address')}</th><th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th></tr></thead>
+    <tbody>${participantRows || `<tr class="empty-row"><td colspan="4">${tr('balances.participants.empty')}</td></tr>`}</tbody>
+    <tfoot><tr><td colspan="3">${tr('balances.participants.sum')}</td><td class="num">${money(rdSum)}</td></tr>
+    <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td></tr></tfoot>`;
+
+  // Clients: Real Tokenizado, one line per token held, each tagged with its token.
+  const rtSums = Object.fromEntries(rts.map((t) => [t.symbol, 0]));
+  const clientRows = snap.wallets.filter(isClient)
+    .filter((w) => !hideEmpty || holdsRt(w))
+    .map((w) => {
+      rts.filter((t) => holds(w, t.symbol)).forEach((t) => { rtSums[t.symbol] += Number(w.holdings[t.symbol].balance); });
+      return `<tr>${walletCells(w)}<td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
+    }).join('');
+  const perToken = (values) => perTokenHtml(rts, values);
+  clients.innerHTML = `<thead><tr><th>${tr('balances.client')}</th><th>${tr('common.signs-with')}</th>
+      <th>${tr('common.address')}</th><th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
+    <tbody>${clientRows || `<tr class="empty-row"><td colspan="4">${tr('balances.clients.empty')}</td></tr>`}</tbody>
+    <tfoot><tr><td colspan="3">${tr('balances.clients.sum')}</td><td class="num rt">${perToken(rtSums)}</td></tr>
+    <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num rt">${perToken(snap.totalSupply)}</td></tr></tfoot>`;
+
+  // Accounts in neither table: never enabled anywhere and holding nothing.
+  const unlisted = hideEmpty ? [] : snap.wallets.filter((w) => !isParticipant(w) && !isClient(w));
+  note.textContent = unlisted.length
+    ? tr('balances.unlisted', { names: unlisted.map((w) => w.wallet.label).join(', ') }) : '';
 
   $('#balances-meta').textContent = tr('common.block-number', { n: snap.blockNumber });
 }
