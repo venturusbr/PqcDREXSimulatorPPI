@@ -326,7 +326,16 @@ final class SimulatorService implements AutoCloseable {
     return Optional.ofNullable(deployment);
   }
 
-  Optional<BalanceService.Snapshot> balances() throws Exception {
+  /** The last balances read, valid for every request at the same head block, wallets and tokens. */
+  private record CachedSnapshot(long head, Object key, BalanceService.Snapshot snapshot) {}
+
+  private CachedSnapshot lastSnapshot;
+
+  /**
+   * Balances of every account. Every open page asks at each new block, so requests are served one at a
+   * time and share the snapshot of the current block: a block costs one read however many pages are open.
+   */
+  synchronized Optional<BalanceService.Snapshot> balances() throws Exception {
     if (deployment == null) {
       return Optional.empty();
     }
@@ -334,7 +343,15 @@ final class SimulatorService implements AutoCloseable {
     for (Account a : store.all()) {
       wallets.add(new BalanceService.Wallet(a.name(), a.address(), a.signingLabel()));
     }
-    return Optional.of(new BalanceService(chain, deployment).snapshot(wallets));
+    Object key = List.of(deployment.realDigital, List.copyOf(deployment.realTokenizados), wallets);
+    long head = chain.blockNumber();
+    CachedSnapshot cached = lastSnapshot;
+    if (cached != null && cached.head() == head && cached.key().equals(key)) {
+      return Optional.of(cached.snapshot());
+    }
+    BalanceService.Snapshot snapshot = new BalanceService(chain, deployment).snapshot(wallets);
+    lastSnapshot = new CachedSnapshot(snapshot.blockNumber(), key, snapshot);
+    return Optional.of(snapshot);
   }
 
   List<TxLog.Entry> transactions(int limit) {
