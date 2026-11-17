@@ -1,26 +1,26 @@
-# The Java build uses the compiled contracts committed in contracts/build, so it needs no Node.js.
-# This check recompiles them from contracts/ and fails when the committed files are out of date.
-name: Contract artifacts
+# Checks the Drex contracts: the compiled artifacts in contracts/build match the sources, and the
+# Hardhat test suite passes. The Java build uses those committed artifacts, so it needs no Node.js.
+name: Contracts
 
 on:
   push:
     paths:
       - "contracts/**"
       - ".gitattributes"
-      - ".github/workflows/contract-artifacts.yml"
+      - ".github/workflows/contracts.yml"
   pull_request:
     paths:
       - "contracts/**"
       - ".gitattributes"
-      - ".github/workflows/contract-artifacts.yml"
+      - ".github/workflows/contracts.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  artifacts:
-    name: contracts/build matches the sources
+  contracts:
+    name: Artifacts and tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -51,3 +51,6 @@ jobs:
             exit 1
           fi
           echo "contracts/build matches a fresh export of the sources."
+
+      - name: Run the contract tests on the Hardhat network
+        run: npm test
