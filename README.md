@@ -118,6 +118,8 @@ mvn test -Ddrexsim.rpc=http://localhost:8545     # also runs the demo, flows and
 cd contracts && npm install && npm test          # contract tests on the Hardhat network
 ```
 
+After changing a contract, run `npm run export` in `contracts/` and commit `contracts/build`. The Java build uses those files so that it needs no Node.js, and the [Contract artifacts](.github/workflows/contract-artifacts.yml) workflow fails when they no longer match a fresh export of the sources. Solidity hashes each source's exact text into the bytecode, so `.gitattributes` keeps the `.sol` files LF on every platform; a CRLF copy compiles to different files.
+
 The signer is checked byte for byte against transactions produced by [besu-flex-wallet-ppi](https://github.com/venturusbr/besu-flex-wallet-ppi), which besu-pqc-ppi accepts.
 
 ## How transactions are signed
