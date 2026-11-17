@@ -7,6 +7,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import java.util.concurrent.TimeUnit;
+import okhttp3.ConnectionPool;
 import okhttp3.OkHttpClient;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.Request;
@@ -20,6 +22,9 @@ import org.web3j.tx.TransactionManager;
  * and one {@link PqcTransactionManager} per account.
  */
 public final class Chain implements AutoCloseable {
+
+  /** Connections kept open to the node for reuse; well under the node's limit of 80. */
+  private static final int IDLE_CONNECTIONS = 24;
 
   /** {@code vnt_getAccountsSupportedDSAs} response. */
   public static final class SupportedDsas extends Response<List<String>> {}
@@ -46,7 +51,11 @@ public final class Chain implements AutoCloseable {
     this.rpcUrl = rpcUrl;
     // An own OkHttp client, so close() can release its keep-alive connections: web3j's HttpService
     // leaves them open for 5 minutes, and a node accepts only 80 (Besu's --rpc-http-max-active-connections).
-    this.client = HttpService.getOkHttpClientBuilder().build();
+    // It keeps up to IDLE_CONNECTIONS idle: callers send transactions from up to 20 threads at once (the
+    // load test's setup, the flows), and with OkHttp's default of 5 the others would open and close a
+    // connection per call.
+    this.client = HttpService.getOkHttpClientBuilder()
+        .connectionPool(new ConnectionPool(IDLE_CONNECTIONS, 5, TimeUnit.MINUTES)).build();
     this.http = new HttpService(rpcUrl, client);
     this.web3j = Web3j.build(http);
     this.chainId = web3j.ethChainId().send().getChainId().longValueExact();

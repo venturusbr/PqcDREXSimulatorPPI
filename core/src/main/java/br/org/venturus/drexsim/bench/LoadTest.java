@@ -1,6 +1,7 @@
 package br.org.venturus.drexsim.bench;
 
 import br.org.venturus.drexsim.chain.Chain;
+import br.org.venturus.drexsim.chain.RpcBatch;
 import br.org.venturus.drexsim.contracts.RealTokenizado;
 import br.org.venturus.drexsim.drex.DrexClient;
 import br.org.venturus.drexsim.drex.DrexDeployment;
@@ -9,13 +10,16 @@ import br.org.venturus.drexsim.scenario.SignerProfile;
 import br.org.venturus.drexsim.tx.SignedTransaction;
 import br.org.venturus.drexsim.tx.TransactionSigner;
 import br.org.venturus.drexsim.tx.UnsignedTransaction;
+import java.io.IOException;
 import java.math.BigInteger;
+import okhttp3.ConnectionPool;
 import okhttp3.OkHttpClient;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -36,6 +40,8 @@ import org.web3j.protocol.core.DefaultBlockParameterName;
 import org.web3j.protocol.core.Request;
 import org.web3j.protocol.core.Response;
 import org.web3j.protocol.core.methods.request.Transaction;
+import org.web3j.protocol.core.methods.response.EthGetTransactionCount;
+import org.web3j.protocol.core.methods.response.EthGetTransactionReceipt;
 import org.web3j.protocol.core.methods.response.EthSendTransaction;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.protocol.http.HttpService;
@@ -91,8 +97,13 @@ public final class LoadTest {
       validators = validatorCount();
       waitForQuiet(); // a previous run's backlog would distort this one
       setup();
-      // One OkHttp client for every node, evicted at the end so its connections do not stay open.
-      OkHttpClient client = HttpService.getOkHttpClientBuilder().build();
+      // One OkHttp client for every node, evicted at the end so its connections do not stay open. Every
+      // submitting thread sends to every node, so it keeps a connection idle per thread and node: with
+      // OkHttp's default of 5, the others would be opened and closed per transaction, and at a few
+      // hundred transactions per second exhaust the local ports.
+      OkHttpClient client = HttpService.getOkHttpClientBuilder()
+          .connectionPool(new ConnectionPool(config.submitThreads() * config.endpoints().size() + 4, 5, TimeUnit.MINUTES))
+          .build();
       List<Web3j> nodes = config.endpoints().stream().map(u -> Web3j.build(new HttpService(u, client))).toList();
       try {
         for (double rate : config.rates()) {
@@ -147,9 +158,9 @@ public final class LoadTest {
     batch(all, (c) -> rt(clientsA.contains(c) ? "BRLA" : "BRLB", c)
         .approve(d.swapOneStep, CLIENT_FUNDS).sendAsync());
 
-    for (Account c : all) {
-      nonces.put(c.address(), new AtomicLong(chain.web3j()
-          .ethGetTransactionCount(c.address(), DefaultBlockParameterName.PENDING).send().getTransactionCount().longValueExact()));
+    List<Long> pending = pendingNonces(all);
+    for (int i = 0; i < all.size(); i++) {
+      nonces.put(all.get(i).address(), new AtomicLong(pending.get(i)));
     }
     // Fixed gas per operation, so the load phase sends without estimating (estimates would race the load).
     transferGas = gasFor(clientsA.get(0), tokenOf("BRLA"), transferData(clientsA.get(1 % clientsA.size()).address()));
@@ -320,18 +331,17 @@ public final class LoadTest {
     Collections.shuffle(includedTxs, new Random(7));
     List<Pending> sample = includedTxs.subList(0, Math.min(200, includedTxs.size()));
     int failed = 0;
-    for (Pending t : sample) {
-      TransactionReceipt r = chain.web3j().ethGetTransactionReceipt(t.hash()).send().getTransactionReceipt().orElse(null);
-      if (r == null || !r.isStatusOK()) {
+    for (Optional<TransactionReceipt> r : receipts(sample)) {
+      if (r.isEmpty() || !r.get().isStatusOK()) {
         failed++;
       }
     }
 
     // Senders whose submissions were rejected have nonce gaps: realign them with the node.
     if (!rejections.isEmpty()) {
-      for (Account c : all) {
-        nonces.get(c.address()).set(chain.web3j()
-            .ethGetTransactionCount(c.address(), DefaultBlockParameterName.PENDING).send().getTransactionCount().longValueExact());
+      List<Long> pending = pendingNonces(all);
+      for (int i = 0; i < all.size(); i++) {
+        nonces.get(all.get(i).address()).set(pending.get(i));
       }
     }
 
@@ -352,14 +362,12 @@ public final class LoadTest {
    */
   private void reconcileWithReceipts(List<Pending> snapshot, BlockWatcher watcher) throws Exception {
     int found = 0;
-    for (Pending t : snapshot) {
-      if (watcher.includedAt(t.hash()) != null) {
-        continue;
-      }
-      TransactionReceipt r = chain.web3j().ethGetTransactionReceipt(t.hash()).send().getTransactionReceipt().orElse(null);
-      if (r != null) {
-        Long observed = watcher.observedAt(r.getBlockNumber().longValueExact());
-        watcher.recordInclusion(t.hash(), observed != null ? observed : System.currentTimeMillis());
+    List<Pending> unseen = snapshot.stream().filter(t -> watcher.includedAt(t.hash()) == null).toList();
+    List<Optional<TransactionReceipt>> receipts = receipts(unseen);
+    for (int i = 0; i < unseen.size(); i++) {
+      if (receipts.get(i).isPresent()) {
+        Long observed = watcher.observedAt(receipts.get(i).get().getBlockNumber().longValueExact());
+        watcher.recordInclusion(unseen.get(i).hash(), observed != null ? observed : System.currentTimeMillis());
         found++;
       }
     }
@@ -403,6 +411,40 @@ public final class LoadTest {
       }
       Thread.sleep(500);
     }
+  }
+
+  // ------------------------------------------------------------------ batched reads
+
+  /** Pending-block nonce of each account, read in JSON-RPC batches. */
+  private List<Long> pendingNonces(List<Account> accounts) throws IOException {
+    List<Request<?, EthGetTransactionCount>> requests = new ArrayList<>();
+    for (Account a : accounts) {
+      requests.add(chain.web3j().ethGetTransactionCount(a.address(), DefaultBlockParameterName.PENDING));
+    }
+    List<Long> result = new ArrayList<>();
+    for (EthGetTransactionCount r : RpcBatch.send(chain.web3j(), requests)) {
+      if (r.hasError()) {
+        throw new IOException("eth_getTransactionCount: " + r.getError().getMessage());
+      }
+      result.add(r.getTransactionCount().longValueExact());
+    }
+    return result;
+  }
+
+  /** Receipt of each transaction (empty while not included), read in JSON-RPC batches. */
+  private List<Optional<TransactionReceipt>> receipts(List<Pending> txs) throws IOException {
+    List<Request<?, EthGetTransactionReceipt>> requests = new ArrayList<>();
+    for (Pending t : txs) {
+      requests.add(chain.web3j().ethGetTransactionReceipt(t.hash()));
+    }
+    List<Optional<TransactionReceipt>> result = new ArrayList<>();
+    for (EthGetTransactionReceipt r : RpcBatch.send(chain.web3j(), requests)) {
+      if (r.hasError()) {
+        throw new IOException("eth_getTransactionReceipt: " + r.getError().getMessage());
+      }
+      result.add(r.getTransactionReceipt());
+    }
+    return result;
   }
 
   private static long pct(List<Long> sorted, int p) {

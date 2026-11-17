@@ -1,12 +1,12 @@
 package br.org.venturus.drexsim.drex;
 
 import br.org.venturus.drexsim.chain.Chain;
+import br.org.venturus.drexsim.chain.RpcBatch;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.io.IOException;
 import java.math.BigInteger;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -19,10 +19,8 @@ import org.web3j.abi.datatypes.Function;
 import org.web3j.abi.datatypes.Type;
 import org.web3j.abi.datatypes.generated.Bytes32;
 import org.web3j.abi.datatypes.generated.Uint256;
-import org.web3j.protocol.core.BatchRequest;
 import org.web3j.protocol.core.DefaultBlockParameter;
 import org.web3j.protocol.core.Request;
-import org.web3j.protocol.core.Response;
 import org.web3j.protocol.core.methods.request.Transaction;
 import org.web3j.protocol.core.methods.response.EthCall;
 
@@ -178,8 +176,6 @@ public final class BalanceService {
   private static final TypeReference<Bool> BOOL = new TypeReference<>() {};
   private static final TypeReference<Address> ADDRESS = new TypeReference<>() {};
   private static final String NO_SENDER = "0x0000000000000000000000000000000000000000";
-  /** Calls per JSON-RPC batch; Besu accepts 1024 by default (--rpc-http-max-batch-size). */
-  private static final int BATCH_SIZE = 500;
 
   @SuppressWarnings("rawtypes")
   private static Function fn(String name, List<? extends Type> inputs, TypeReference<?> output) {
@@ -187,9 +183,8 @@ public final class BalanceService {
   }
 
   /**
-   * Read-only contract calls sent as JSON-RPC batches, all at one block. A snapshot thus costs one
-   * HTTP request per {@value #BATCH_SIZE} calls, instead of one request (and, with web3j's async
-   * calls, one connection) per call.
+   * Read-only contract calls sent as JSON-RPC batches ({@link RpcBatch}), all at one block: a snapshot
+   * costs one HTTP request instead of one request (and, with web3j's async calls, one connection) per call.
    */
   private final class CallBatch {
     private final DefaultBlockParameter at;
@@ -210,40 +205,21 @@ public final class BalanceService {
     }
 
     void send() throws IOException {
-      for (int from = 0; from < requests.size(); from += BATCH_SIZE) {
-        List<Request<?, EthCall>> chunk = requests.subList(from, Math.min(from + BATCH_SIZE, requests.size()));
-        BatchRequest batch = chain.web3j().newBatch();
-        Map<Long, Integer> indexById = new HashMap<>();
-        for (int i = 0; i < chunk.size(); i++) {
-          batch.add(chunk.get(i));
-          indexById.put(chunk.get(i).getId(), from + i);
+      List<EthCall> responses = RpcBatch.send(chain.web3j(), requests);
+      for (int i = 0; i < responses.size(); i++) {
+        EthCall call = responses.get(i);
+        Function function = functions.get(i);
+        if (call.hasError()) {
+          throw new IOException(function.getName() + ": " + call.getError().getMessage());
         }
-        Object[] values = new Object[chunk.size()];
-        for (Response<?> response : batch.send().getResponses()) {
-          Integer index = indexById.get(response.getId());
-          if (index == null) {
-            throw new IOException("Unexpected response id " + response.getId() + " in a batch of eth_call");
-          }
-          Function function = functions.get(index);
-          if (response.hasError()) {
-            throw new IOException(function.getName() + ": " + response.getError().getMessage());
-          }
-          EthCall call = (EthCall) response;
-          if (call.isReverted()) {
-            throw new IOException(function.getName() + " reverted: " + call.getRevertReason());
-          }
-          List<Type> decoded = FunctionReturnDecoder.decode(call.getValue(), function.getOutputParameters());
-          if (decoded.isEmpty()) {
-            throw new IOException(function.getName() + " returned no data at " + function.getInputParameters());
-          }
-          values[index - from] = decoded.get(0).getValue();
+        if (call.isReverted()) {
+          throw new IOException(function.getName() + " reverted: " + call.getRevertReason());
         }
-        for (Object value : values) {
-          if (value == null) {
-            throw new IOException("A batch of eth_call came back incomplete");
-          }
-          results.add(value);
+        List<Type> decoded = FunctionReturnDecoder.decode(call.getValue(), function.getOutputParameters());
+        if (decoded.isEmpty()) {
+          throw new IOException(function.getName() + " returned no data at " + function.getInputParameters());
         }
+        results.add(decoded.get(0).getValue());
       }
     }
 
