@@ -24,6 +24,8 @@ public final class DrexDeployment {
   private static final String FILE = "deployment.json";
 
   public long chainId;
+  /** BCB wallet that deployed the network: authority and admin of RealDigital. */
+  public String authority;
   public String realDigital;
   public String str;
   public String realDigitalEnableAccount;

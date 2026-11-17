@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -17 213 213" role="img" aria-label="Drex">
+  <style>
+    .teal { fill: #004958; }
+    .lime { fill: #B2C802; }
+    @media (prefers-color-scheme: dark) { .teal { fill: #5FA9B6; } }
+  </style>
+  <path class="teal" d="M0 0H114A89.5 89.5 0 0 1 114 179H0V151H104A56 61.5 0 0 0 104 28H0Z"/>
+  <path class="teal" d="M0 50L67 89.5L0 129Z"/>
+  <path class="lime" d="M81 50L148 89.5L81 129Z"/>
+</svg>

@@ -10,6 +10,7 @@ import br.org.venturus.drexsim.tx.SignedTransaction;
 import br.org.venturus.drexsim.tx.TransactionSigner;
 import br.org.venturus.drexsim.tx.UnsignedTransaction;
 import java.math.BigInteger;
+import okhttp3.OkHttpClient;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -90,7 +91,9 @@ public final class LoadTest {
       validators = validatorCount();
       waitForQuiet(); // a previous run's backlog would distort this one
       setup();
-      List<Web3j> nodes = config.endpoints().stream().map(u -> Web3j.build(new HttpService(u))).toList();
+      // One OkHttp client for every node, evicted at the end so its connections do not stay open.
+      OkHttpClient client = HttpService.getOkHttpClientBuilder().build();
+      List<Web3j> nodes = config.endpoints().stream().map(u -> Web3j.build(new HttpService(u, client))).toList();
       try {
         for (double rate : config.rates()) {
           LevelResult r = level(nodes, rate);
@@ -103,6 +106,8 @@ public final class LoadTest {
         }
       } finally {
         nodes.forEach(Web3j::shutdown);
+        client.dispatcher().executorService().shutdown();
+        client.connectionPool().evictAll();
       }
     }
     return results;
@@ -414,7 +419,7 @@ public final class LoadTest {
   private int validatorCount() {
     try {
       Response<?> r = new Request<>("qbft_getValidatorsByBlockNumber", List.of("latest"),
-          new HttpService(config.endpoints().get(0)), ValidatorsResponse.class).send();
+          chain.web3jService(), ValidatorsResponse.class).send();
       return r.getResult() instanceof List<?> l ? l.size() : 0;
     } catch (Exception e) {
       return 0;

@@ -47,6 +47,7 @@ public final class DrexClient {
     var gas = chain.gasProvider();
     DrexDeployment d = new DrexDeployment();
     d.chainId = chain.chainId();
+    d.authority = bcb.address();
 
     out.accept("Deploying RealDigital");
     RealDigital rd = RealDigital.deploy(chain.web3j(), tm, gas, "Real Digital", "BRL", bcb.address(), bcb.address()).send();

@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
+import okhttp3.OkHttpClient;
 import org.web3j.protocol.Web3j;
 import org.web3j.protocol.core.Request;
 import org.web3j.protocol.core.Response;
@@ -24,6 +25,7 @@ public final class Chain implements AutoCloseable {
   public static final class SupportedDsas extends Response<List<String>> {}
 
   private final String rpcUrl;
+  private final OkHttpClient client;
   private final HttpService http;
   private final Web3j web3j;
   private final long chainId;
@@ -33,16 +35,36 @@ public final class Chain implements AutoCloseable {
   private final List<Consumer<SentTransaction>> listeners = new CopyOnWriteArrayList<>();
 
   public Chain(String rpcUrl) throws IOException {
+    this(rpcUrl, null);
+  }
+
+  /**
+   * Connection that hands out nonces from {@code sharedNonces}, so the same accounts can send through
+   * several nodes of one network without reusing a nonce. {@code null} gives this connection its own.
+   */
+  public Chain(String rpcUrl, NonceManager sharedNonces) throws IOException {
     this.rpcUrl = rpcUrl;
-    this.http = new HttpService(rpcUrl);
+    // An own OkHttp client, so close() can release its keep-alive connections: web3j's HttpService
+    // leaves them open for 5 minutes, and a node accepts only 80 (Besu's --rpc-http-max-active-connections).
+    this.client = HttpService.getOkHttpClientBuilder().build();
+    this.http = new HttpService(rpcUrl, client);
     this.web3j = Web3j.build(http);
     this.chainId = web3j.ethChainId().send().getChainId().longValueExact();
-    this.nonces = new NonceManager(web3j);
+    this.nonces = sharedNonces != null ? sharedNonces : new NonceManager(web3j);
     this.gasProvider = new AutoGasProvider(chainId);
   }
 
   public String rpcUrl() {
     return rpcUrl;
+  }
+
+  public NonceManager nonces() {
+    return nonces;
+  }
+
+  /** The HTTP service under {@link #web3j()}, for calls web3j has no method for. */
+  public HttpService web3jService() {
+    return http;
   }
 
   public Web3j web3j() {
@@ -91,5 +113,7 @@ public final class Chain implements AutoCloseable {
   @Override
   public void close() {
     web3j.shutdown();
+    client.dispatcher().executorService().shutdown();
+    client.connectionPool().evictAll();
   }
 }

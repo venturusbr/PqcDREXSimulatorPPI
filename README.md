@@ -8,6 +8,7 @@ A front-end and smart contracts that reproduce Brazil's Real Digital (Drex) pilo
 |---|---|
 | [contracts/](contracts) | Hardhat project: the Drex contracts (pinned copy, OpenZeppelin 4.9.6), functional tests on the standard EVM, and the ABI/bytecode exported to `contracts/build/` for the Java core |
 | [core/](core) | Java 21 library and `drexsim` CLI: signs transactions with every DSA of besu-pqc-ppi, deploys and drives the Drex contracts, shows RD/RT balances |
+| [gui/](gui) | Web interface (`drexsim-gui`): live balances, Drex operations, transaction log with signature sizes and gas, and the evaluation runs with their reports |
 | [infra/](infra) | Starts a besu-pqc-ppi QBFT network through besu-qbft, with every account DSA enabled, and runs load tests across validator counts |
 | [docs/](docs) | Contracts reference and use-case flows |
 
@@ -42,6 +43,21 @@ java -jar core/target/drexsim.jar balances --watch 2
 `setup-demo` creates BCB, two banks with their reserves and Real Tokenizado (BRLA, BRLB) and three clients, each actor signing with a different DSA (`MLDSA44`, `MLDSA87`, `FALCON512`, both hybrids, and standard ECDSA for one bank as the classical baseline). It then mints Real Digital through STR, deposits client funds, freezes part of a balance, and runs payments in which every client signs: two inter-bank swaps and one transfer inside Banco A. Every transaction is printed with its type, signature and key sizes and gas limit.
 
 Other commands: `accounts list`, `accounts new <name> --dsa <DSA> [--standard]`, `deploy`, and the evaluation commands `flows`, `security` and `bench` (below). Run `java -jar core/target/drexsim.jar <command> --help` for details. Accounts and contract addresses are kept in `simulator-data/` (`--data-dir`); the keys there are **test keys in plain text**.
+
+### Web interface
+
+```sh
+java -jar gui/target/drexsim-gui.jar
+```
+
+Then open http://localhost:8080. The page shows:
+
+- **Overview**: live balances of every account, refreshed at every block and with frozen parts shown: one Real Digital column and one Real Tokenizado column, where each amount is tagged with its token (BRLA, BRLB, ...), so the table keeps its width however many banks issue tokens. An icon beside each name shows what the wallet is on chain, read from the contracts' access control: BCB (admin of Real Digital), participant (enabled in Real Digital), reserve (reserve wallet of a Real Tokenizado), client (enabled in a Real Tokenizado), or none of these. A wallet holding a token it is not enabled for received it by a plain transfer, which the contracts only check on the sender side. A form for each Drex operation (STR issuance and redemption, transfers, deposits, withdrawals, inter-bank payments, freezing, forced transfers, pause, onboarding), each signed by the account its flow names and sent to the node you choose, and the transactions sent, with their algorithm, type (`0x42` or `0x02`), size, signature and key bytes, gas, receipt status and node. **Details** on a transaction opens what `eth_getTransactionByHash` and `eth_getTransactionReceipt` return, organized: overview with account and contract names, the decoded call, signature algorithm and sizes, gas, the decoded events, and the raw JSON. On a chain without a Drex network it offers to set up the demo.
+- **Accounts**: the simulated accounts and a form to create one with any algorithm.
+- **Evaluation**: runs the flows, security and load tests, with their log live and their report when done.
+- **Network**: every node with its status, block, peers, validator address and P2P address; the chain's validators, accepted algorithms and contract addresses.
+
+It uses the same `--rpc` and `--data-dir` options as the CLI, so accounts and deployments are shared. The other nodes are found by probing the 15 local ports after the `--rpc` port (besu-qbft maps node N to 8545 + N − 1), keeping those on the same chain; `--nodes http://host:8545,http://host:8546,...` lists them instead. All nodes share one nonce counter per account, so an account can switch nodes between operations. The GUI signs with every simulated account, so it listens on 127.0.0.1 only; `--host` changes that, which is not advisable.
 
 ### Balance viewer
 
@@ -124,6 +140,21 @@ The contracts come from [wireshape/real-digital-smart-contracts](https://github.
 | [RealDigitalDefaultAccount.sol](https://github.com/wireshape/real-digital-smart-contracts/blob/main/RealDigitalDefaultAccount.sol) | Default wallet of each participant, by CNPJ8 |
 | [KeyDictionary.sol](https://github.com/wireshape/real-digital-smart-contracts/blob/main/KeyDictionary.sol) | Directory from client key to bank data and wallet |
 | [AddressDiscovery.sol](https://github.com/wireshape/real-digital-smart-contracts/blob/main/AddressDiscovery.sol) | Directory of deployed contract addresses |
+
+### Known contract flaws
+
+These are flaws in the contracts themselves, so no signature scheme fixes them. The contracts are kept as published, and the simulator works around the flaws where a flow needs it. `drexsim security` reproduces the first three on a live network ([results](docs/results/README.md)):
+
+1. **`transfer` does not check the recipient.** `checkAccess` checks only the sender of a transfer and checks the recipient only when tokens are minted. Funds can be sent to a wallet that is not enabled in the token, and that wallet cannot move them afterwards. The Overview of the web interface shows such a wallet with the "not enabled" icon. `transferFrom` checks both sides. See [checkAccess](docs/contracts-reference.md#modifier-checkaccessfrom-to).
+2. **Any participant can enable any address in RealDigital.** RealDigitalEnableAccount only requires the caller to be enabled, so a bank can bring any wallet into the wholesale token. See [RealDigitalEnableAccount](docs/contracts-reference.md#realdigitalenableaccount).
+3. **Any participant can overwrite another bank's client key.** `KeyDictionary.addAccount` does not check whether the key exists, so a participant can redirect another bank's client to a wallet of its choice. See [KeyDictionary](docs/contracts-reference.md#keydictionary).
+
+The [contracts reference](docs/contracts-reference.md) describes the other caveats found while building the tests:
+- `moveAndBurn` reverts until the token contract's own address is enabled.
+- A frozen amount is not capped by the balance.
+- `burnFrom` relies on the allowance that `mint` grants.
+- SwapTwoSteps does not freeze funds when a swap is proposed, and its proposal ids start at 1.
+- KeyDictionary's "already registered" check never blocks.
 
 ## Documentation
 

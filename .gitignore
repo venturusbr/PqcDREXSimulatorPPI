@@ -1,6 +1,6 @@
 target/
-simulator-data/
 *.iml
 .idea/
 .vscode/
 reports/
+simulator-data*/

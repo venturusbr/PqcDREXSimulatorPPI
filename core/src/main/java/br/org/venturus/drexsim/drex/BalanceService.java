@@ -2,6 +2,7 @@ package br.org.venturus.drexsim.drex;
 
 import br.org.venturus.drexsim.chain.Chain;
 import br.org.venturus.drexsim.contracts.RealDigital;
+import br.org.venturus.drexsim.contracts.RealTokenizado;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import java.math.BigInteger;
 import java.time.Instant;
@@ -43,7 +44,22 @@ public final class BalanceService {
   /** A token column: Real Digital or one participant's Real Tokenizado. */
   public record Token(String symbol, String name, String address) {}
 
-  public record WalletBalances(Wallet wallet, Map<String, Holding> holdings) {
+  /**
+   * What a wallet is on chain, from the contracts' own access control at the snapshot's block: {@code
+   * bcb} holds DEFAULT_ADMIN_ROLE on RealDigital, {@code reserve} is the reserve wallet of a Real
+   * Tokenizado, {@code participant} is enabled in RealDigital (a bank or other institution), and
+   * {@code client} is enabled in the Real Tokenizado listed in {@code clientOf}. A wallet can have
+   * several roles, or none if it was never enabled anywhere.
+   */
+  public record Roles(List<String> roles, List<String> clientOf) {
+    public static final Roles NONE = new Roles(List.of(), List.of());
+  }
+
+  public record WalletBalances(Wallet wallet, Map<String, Holding> holdings, Roles roles) {
+    public WalletBalances(Wallet wallet, Map<String, Holding> holdings) {
+      this(wallet, holdings, Roles.NONE);
+    }
+
     @JsonIgnore
     public Holding of(String symbol) {
       return holdings.getOrDefault(symbol, Holding.ZERO);
@@ -93,7 +109,18 @@ public final class BalanceService {
     Map<String, CompletableFuture<BigInteger>> supply = new LinkedHashMap<>();
     contracts.forEach((symbol, c) -> supply.put(symbol, async(c.totalSupply())));
 
+    // Reserve wallets, as each Real Tokenizado records them.
+    Map<String, CompletableFuture<String>> reserves = new LinkedHashMap<>();
+    for (Token token : tokens.subList(1, tokens.size())) {
+      RealTokenizado rt = RealTokenizado.load(token.address(), chain.web3j(), chain.readOnly(), chain.gasProvider());
+      rt.setDefaultBlockParameter(at);
+      reserves.put(token.symbol(), async(rt.reserve()));
+    }
+    RealDigital rd = contracts.get(RD);
+
     List<Map<String, CompletableFuture<Holding>>> pending = new ArrayList<>();
+    List<CompletableFuture<Boolean>> admins = new ArrayList<>();
+    List<Map<String, CompletableFuture<Boolean>>> enabled = new ArrayList<>();
     for (Wallet wallet : wallets) {
       Map<String, CompletableFuture<Holding>> row = new LinkedHashMap<>();
       contracts.forEach(
@@ -103,17 +130,42 @@ public final class BalanceService {
                   async(c.balanceOf(wallet.address()))
                       .thenCombine(async(c.frozenBalanceOf(wallet.address())), Holding::new)));
       pending.add(row);
+      admins.add(async(rd.hasRole(new byte[32], wallet.address())));
+      Map<String, CompletableFuture<Boolean>> access = new LinkedHashMap<>();
+      contracts.forEach((symbol, c) -> access.put(symbol, async(c.verifyAccount(wallet.address()))));
+      enabled.add(access);
     }
+    List<String> reserveAddresses = reserves.values().stream().map(f -> f.join().toLowerCase()).toList();
 
     List<WalletBalances> rows = new ArrayList<>();
     for (int i = 0; i < wallets.size(); i++) {
       Map<String, Holding> holdings = new LinkedHashMap<>();
       pending.get(i).forEach((symbol, f) -> holdings.put(symbol, f.join()));
-      rows.add(new WalletBalances(wallets.get(i), holdings));
+      rows.add(new WalletBalances(wallets.get(i), holdings,
+          roles(wallets.get(i), admins.get(i).join(), enabled.get(i), reserveAddresses)));
     }
     Map<String, BigInteger> totals = new LinkedHashMap<>();
     supply.forEach((symbol, f) -> totals.put(symbol, f.join()));
     return new Snapshot(block, Instant.now(), tokens, rows, totals);
+  }
+
+  private static Roles roles(
+      Wallet wallet, boolean admin, Map<String, CompletableFuture<Boolean>> enabled, List<String> reserves) {
+    List<String> roles = new ArrayList<>();
+    List<String> clientOf = new ArrayList<>();
+    boolean reserve = reserves.contains(wallet.address().toLowerCase());
+    if (admin) roles.add("bcb");
+    if (reserve) roles.add("reserve");
+    enabled.forEach((symbol, f) -> {
+      if (!f.join()) return;
+      if (symbol.equals(RD)) {
+        if (!reserve) roles.add("participant");
+      } else {
+        clientOf.add(symbol);
+      }
+    });
+    if (!clientOf.isEmpty()) roles.add("client");
+    return new Roles(List.copyOf(roles), List.copyOf(clientOf));
   }
 
   private static <T> CompletableFuture<T> async(RemoteFunctionCall<T> call) {
