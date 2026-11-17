@@ -93,6 +93,10 @@ p { margin: 0 0 12px; }
   display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
   background: var(--surface-2); border: 1px solid var(--border); font-size: 13px; font-variant-numeric: tabular-nums;
 }
+.header-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.lang { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
+.lang svg { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; }
+.lang select { width: auto; padding: 5px 8px; font-size: 13px; background: var(--surface-2); cursor: pointer; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
 .dot.up { background: var(--ok); box-shadow: 0 0 0 0 var(--ok); animation: pulse 2s infinite; }
 .dot.down { background: var(--err); }

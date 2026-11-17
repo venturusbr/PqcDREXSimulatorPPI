@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,34 +13,38 @@
     <div class="brand">
       <img class="logo" src="logo.svg" alt="" width="38" height="38">
       <div>
-        <h1>PQC Drex Simulator</h1>
-        <p class="subtitle">Real Digital pilot on Besu PQC</p>
+        <h1 data-i18n="app.title"></h1>
+        <p class="subtitle" data-i18n="app.subtitle"></p>
       </div>
     </div>
-    <div class="netstatus" id="netstatus">
-      <span class="dot" id="netdot"></span>
-      <span id="nettext">Connecting…</span>
+    <div class="header-tools">
+      <div class="netstatus" id="netstatus">
+        <span class="dot" id="netdot"></span>
+        <span id="nettext" data-i18n="app.connecting"></span>
+      </div>
+      <label class="lang" title="Language" data-i18n-title="app.language">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        <select id="lang" aria-label="Language" data-i18n-aria-label="app.language"></select>
+      </label>
     </div>
   </header>
 
   <nav class="tabs" role="tablist">
-    <button role="tab" class="tab active" data-tab="overview">Overview</button>
-    <button role="tab" class="tab" data-tab="accounts">Accounts</button>
-    <button role="tab" class="tab" data-tab="evaluation">Evaluation</button>
-    <button role="tab" class="tab" data-tab="network">Network</button>
+    <button role="tab" class="tab active" data-tab="overview" data-i18n="tab.overview"></button>
+    <button role="tab" class="tab" data-tab="accounts" data-i18n="tab.accounts"></button>
+    <button role="tab" class="tab" data-tab="evaluation" data-i18n="tab.evaluation"></button>
+    <button role="tab" class="tab" data-tab="network" data-i18n="tab.network"></button>
   </nav>
 
   <main>
     <!-- Overview -->
     <section class="panel active" id="tab-overview">
       <div class="card empty-state hidden" id="no-deployment">
-        <h2>No Drex network on this chain yet</h2>
-        <p>Set up the demo: BCB, two banks with their reserves and Real Tokenizado, and three clients, each signing with a different
-          algorithm. It mints Real Digital, deposits client funds, freezes part of a balance and runs payments between clients.
-          It takes about two minutes.</p>
+        <h2 data-i18n="setup.title"></h2>
+        <p data-i18n="setup.description"></p>
         <div class="actions">
-          <button class="primary" id="btn-demo">Set up the demo network</button>
-          <button id="btn-deploy">Deploy the contracts only</button>
+          <button class="primary" id="btn-demo" data-i18n="setup.demo-button"></button>
+          <button id="btn-deploy" data-i18n="setup.deploy-button"></button>
         </div>
         <div class="joblive hidden" id="setup-job"></div>
       </div>
@@ -48,26 +52,26 @@
       <div class="grid">
         <div class="card balances-card">
           <div class="card-head">
-            <h2>Balances</h2>
+            <h2 data-i18n="balances.title"></h2>
             <div class="card-tools">
-              <label class="toggle"><input type="checkbox" id="hide-empty"> Hide empty wallets</label>
+              <label class="toggle"><input type="checkbox" id="hide-empty"> <span data-i18n="balances.hide-empty"></span></label>
               <span class="muted" id="balances-meta"></span>
             </div>
           </div>
           <div class="table-wrap"><table class="data balances" id="balances"></table></div>
           <p class="legend">
-            <span class="badge pq">post-quantum</span>
-            <span class="badge hybrid">hybrid</span>
-            <span class="badge classical">classical</span>
+            <span class="badge pq" data-i18n="family.pq"></span>
+            <span class="badge hybrid" data-i18n="family.hybrid"></span>
+            <span class="badge classical" data-i18n="family.classical"></span>
             <span class="legend-roles" id="role-legend"></span>
-            Amounts in R$. Only the part not frozen can be spent.
+            <span data-i18n="balances.legend"></span>
           </p>
         </div>
 
         <div class="card op-card">
-          <div class="card-head"><h2>Run an operation</h2></div>
+          <div class="card-head"><h2 data-i18n="op.title"></h2></div>
           <label class="field">
-            <span>Operation</span>
+            <span data-i18n="common.operation"></span>
             <select id="op-select"></select>
           </label>
           <p class="op-desc" id="op-desc"></p>
@@ -78,8 +82,8 @@
 
       <div class="card">
         <div class="card-head">
-          <h2>Transactions</h2>
-          <span class="muted">Sent from this interface, newest first. Receipts update live.</span>
+          <h2 data-i18n="txs.title"></h2>
+          <span class="muted" data-i18n="txs.subtitle"></span>
         </div>
         <div class="table-wrap"><table class="data" id="txs"></table></div>
       </div>
@@ -89,17 +93,17 @@
     <section class="panel" id="tab-accounts">
       <div class="grid">
         <div class="card">
-          <div class="card-head"><h2>Simulated accounts</h2><span class="muted">Test keys, kept in accounts.json</span></div>
+          <div class="card-head"><h2 data-i18n="accounts.title"></h2><span class="muted" data-i18n="accounts.subtitle"></span></div>
           <div class="table-wrap"><table class="data" id="accounts"></table></div>
         </div>
         <div class="card op-card">
-          <div class="card-head"><h2>New account</h2></div>
+          <div class="card-head"><h2 data-i18n="accounts.new.title"></h2></div>
           <form id="account-form" autocomplete="off">
-            <label class="field"><span>Name</span><input name="name" required placeholder="account-name" pattern="[A-Za-z0-9._@\-]{1,32}"></label>
-            <label class="field"><span>Signature algorithm</span><select name="dsa" id="account-dsa"></select></label>
+            <label class="field"><span data-i18n="common.name"></span><input name="name" required placeholder="account-name" data-i18n-placeholder="accounts.new.name-placeholder" pattern="[A-Za-z0-9._@\-]{1,32}"></label>
+            <label class="field"><span data-i18n="accounts.new.algorithm"></span><select name="dsa" id="account-dsa"></select></label>
             <label class="toggle"><input type="checkbox" name="standard" id="account-standard">
-              Standard EIP-1559 transactions (ECDSA only, the classical baseline)</label>
-            <button class="primary" type="submit">Create account</button>
+              <span data-i18n="accounts.new.standard"></span></label>
+            <button class="primary" type="submit" data-i18n="accounts.new.submit"></button>
           </form>
           <div class="op-result hidden" id="account-result"></div>
           <dl class="dsa-notes" id="dsa-notes"></dl>
@@ -111,36 +115,33 @@
     <section class="panel" id="tab-evaluation">
       <div class="eval-grid">
         <div class="card">
-          <h2>Drex flows per algorithm</h2>
-          <p>Runs the 19 use-case flows once per signer, each with fresh accounts and contracts, checking the on-chain state of every
-            flow. Reports pass/fail, gas and bytes per flow and algorithm. About 3 minutes.</p>
+          <h2 data-i18n="eval.flows.title"></h2>
+          <p data-i18n="eval.flows.description"></p>
           <div class="chips" id="flows-dsas"></div>
-          <button class="primary" data-job="flows">Run the flows</button>
+          <button class="primary" data-job="flows" data-i18n="eval.flows.run"></button>
         </div>
         <div class="card">
-          <h2>Security tests</h2>
-          <p>Forged and tampered transactions for every algorithm, a simulated quantum adversary that knows every ECDSA private key
-            (against a classical and a hybrid deployment), and known contract flaws. About 3 minutes.</p>
-          <button class="primary" data-job="security">Run the security tests</button>
+          <h2 data-i18n="eval.security.title"></h2>
+          <p data-i18n="eval.security.description"></p>
+          <button class="primary" data-job="security" data-i18n="eval.security.run"></button>
         </div>
         <div class="card">
-          <h2>Load test</h2>
-          <p>Clients of two banks paying each other at increasing rates. Reports included TPS, latency, block fill and the gas-bound
-            ceiling.</p>
+          <h2 data-i18n="eval.bench.title"></h2>
+          <p data-i18n="eval.bench.description"></p>
           <div class="chips" id="bench-dsas"></div>
           <div class="inline-fields">
-            <label class="field"><span>Rates (TPS)</span><input id="bench-rates" value="25,50,100"></label>
-            <label class="field"><span>Seconds per rate</span><input id="bench-seconds" type="number" min="5" value="20"></label>
-            <label class="field"><span>Clients per bank</span><input id="bench-clients" type="number" min="2" value="20"></label>
+            <label class="field"><span data-i18n="eval.bench.rates"></span><input id="bench-rates" value="25,50,100"></label>
+            <label class="field"><span data-i18n="eval.bench.seconds"></span><input id="bench-seconds" type="number" min="5" value="20"></label>
+            <label class="field"><span data-i18n="eval.bench.clients"></span><input id="bench-clients" type="number" min="2" value="20"></label>
           </div>
-          <label class="field"><span>Nodes (comma-separated RPC URLs, empty for this node only)</span>
+          <label class="field"><span data-i18n="eval.bench.nodes"></span>
             <input id="bench-nodes" placeholder="http://localhost:8545,http://localhost:8546"></label>
-          <button class="primary" data-job="bench">Run the load test</button>
+          <button class="primary" data-job="bench" data-i18n="eval.bench.run"></button>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-head"><h2>Runs</h2><span class="muted">One at a time; reports are also written to the reports directory.</span></div>
+        <div class="card-head"><h2 data-i18n="eval.runs.title"></h2><span class="muted" id="runs-note"></span></div>
         <div class="jobs" id="jobs"></div>
         <div class="job-detail hidden" id="job-detail">
           <div class="card-head"><h3 id="job-title"></h3><span class="status" id="job-status"></span></div>
@@ -154,21 +155,21 @@
     <section class="panel" id="tab-network">
       <div class="card">
         <div class="card-head">
-          <h2>Nodes</h2>
+          <h2 data-i18n="network.nodes.title"></h2>
           <div class="card-tools">
-            <span class="muted">Operations can be sent to any reachable node from the Overview tab.</span>
-            <button id="btn-rescan">Rescan</button>
+            <span class="muted" data-i18n="network.nodes.subtitle"></span>
+            <button id="btn-rescan" data-i18n="network.nodes.rescan"></button>
           </div>
         </div>
         <div class="table-wrap"><table class="data" id="nodes"></table></div>
       </div>
       <div class="grid">
         <div class="card">
-          <h2>Chain</h2>
+          <h2 data-i18n="network.chain.title"></h2>
           <dl class="kv" id="net-kv"></dl>
         </div>
         <div class="card">
-          <h2>Contracts</h2>
+          <h2 data-i18n="network.contracts.title"></h2>
           <div class="table-wrap"><table class="data" id="contracts"></table></div>
         </div>
       </div>
@@ -177,13 +178,14 @@
 
   <dialog class="modal" id="tx-dialog" aria-labelledby="tx-dialog-title">
     <div class="modal-head">
-      <h2 id="tx-dialog-title">Transaction</h2>
-      <button class="icon" id="tx-dialog-close" aria-label="Close">✕</button>
+      <h2 id="tx-dialog-title" data-i18n="details.title"></h2>
+      <button class="icon" id="tx-dialog-close" aria-label="Close" data-i18n-aria-label="app.close">✕</button>
     </div>
     <div class="modal-body" id="tx-dialog-body"></div>
   </dialog>
 
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="app.js"></script>
+  <!-- i18n.js loads the language, then starts app.js. -->
+  <script src="i18n.js"></script>
 </body>
 </html>

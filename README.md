@@ -57,6 +57,10 @@ Then open http://localhost:8080. The page shows:
 - **Evaluation**: runs the flows, security and load tests, with their log live and their report when done.
 - **Network**: every node with its status, block, peers, validator address and P2P address; the chain's validators, accepted algorithms and contract addresses.
 
+The interface is in Brazilian Portuguese by default; the globe menu in the header switches it to English, and the browser remembers the choice. Logs, reports and error messages from the simulator stay in English.
+
+Each language is a JSON file in [gui/src/main/resources/public/i18n/](gui/src/main/resources/public/i18n), named by its locale (`en-US.json`, `pt-BR.json`), mapping keys such as `balances.title` to text and giving its own name in `"_language"`. To add a language, copy `en-US.json` to a file named after the new locale, translate the values and rebuild: the server lists the files at `/api/languages` and the menu offers every one. `{name}` placeholders must be kept; a key with `.one` / `.other` forms is a plural. A key missing from a language falls back to English, and `LanguagesTest` fails when a file lacks a key or a placeholder of `en-US.json`.
+
 It uses the same `--rpc` and `--data-dir` options as the CLI, so accounts and deployments are shared. The other nodes are found by probing the 15 local ports after the `--rpc` port (besu-qbft maps node N to 8545 + N − 1), keeping those on the same chain; `--nodes http://host:8545,http://host:8546,...` lists them instead. All nodes share one nonce counter per account, so an account can switch nodes between operations. The GUI signs with every simulated account, so it listens on 127.0.0.1 only; `--host` changes that, which is not advisable.
 
 ### Balance viewer

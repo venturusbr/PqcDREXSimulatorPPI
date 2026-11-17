@@ -19,16 +19,8 @@ const state = {
 
 const ALL_DSAS = ['SECP256K1', 'SECP256R1', 'MLDSA44', 'MLDSA65', 'MLDSA87', 'FALCON512', 'SECP256K1-MLDSA44', 'SECP256K1-FALCON512'];
 const PROFILES = ['SECP256K1:std', ...ALL_DSAS];
-const DSA_NOTES = {
-  'SECP256K1': 'ECDSA, as on Ethereum. Classical: broken by a quantum computer.',
-  'SECP256R1': 'ECDSA on the NIST P-256 curve. Classical.',
-  'MLDSA44': 'ML-DSA (FIPS 204), security category 2. Key 1,312 B, signature 2,420 B.',
-  'MLDSA65': 'ML-DSA, category 3. Key 1,952 B, signature 3,309 B.',
-  'MLDSA87': 'ML-DSA, category 5. Key 2,592 B, signature 4,627 B.',
-  'FALCON512': 'Falcon-512, category 1. Key 896 B, signature about 660 B (variable). The cheapest in gas.',
-  'SECP256K1-MLDSA44': 'Hybrid: an ECDSA and an ML-DSA-44 signature. Safe as long as either holds.',
-  'SECP256K1-FALCON512': 'Hybrid: an ECDSA and a Falcon-512 signature.',
-};
+/** Note on an algorithm (key dsa.<DSA> of the language files), or '' for one without a note. */
+const dsaNote = (dsa) => trOr(`dsa.${dsa}`, '');
 
 const $ = (sel) => document.querySelector(sel);
 const brl = new Intl.NumberFormat('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -53,7 +45,7 @@ function family(dsa) {
 
 function badge(label) {
   const dsa = String(label || '').replace(/\s*\(std\)$/, '');
-  return `<span class="badge ${family(dsa)}" title="${esc(DSA_NOTES[dsa] || '')}">${esc(label)}</span>`;
+  return `<span class="badge ${family(dsa)}" title="${esc(dsaNote(dsa))}">${esc(label)}</span>`;
 }
 
 function profileLabel(p) {
@@ -61,7 +53,7 @@ function profileLabel(p) {
 }
 
 function time(iso) {
-  return iso ? new Date(iso).toLocaleTimeString() : '';
+  return iso ? new Date(iso).toLocaleTimeString(LOCALE) : '';
 }
 
 let toastTimer;
@@ -91,7 +83,7 @@ document.addEventListener('click', (e) => {
   const copy = e.target.closest('[data-copy]');
   if (copy) {
     navigator.clipboard?.writeText(copy.dataset.copy);
-    toast(`Copied ${shortAddr(copy.dataset.copy)}`);
+    toast(tr('app.copied', { value: shortAddr(copy.dataset.copy) }));
   }
 });
 
@@ -124,17 +116,17 @@ function renderNetwork() {
   const n = state.network || {};
   $('#netdot').className = `dot ${n.reachable ? 'up' : 'down'}`;
   $('#nettext').textContent = n.reachable
-    ? `Chain ${n.chainId} · block #${n.block} · ${(n.validators || []).length} validators`
-    : `Node unreachable${n.error ? `: ${n.error}` : ''}`;
+    ? tr('network.status', { id: n.chainId, block: n.block, n: (n.validators || []).length })
+    : `${tr('network.unreachable')}${n.error ? `: ${n.error}` : ''}`;
 
   const kv = [
-    ['Primary RPC endpoint', esc(n.rpc)],
-    ['Chain id', esc(n.chainId)],
-    ['Latest block', esc(n.block)],
-    ['Validators', (n.validators || []).map((v) => `<span class="addr" data-copy="${esc(v)}">${esc(v)}</span>`).join('<br>') || '–'],
-    ['Account DSAs accepted', (n.accountDsas || []).map(badge).join(' ') || '–'],
+    ['network.chain.rpc', esc(n.rpc)],
+    ['common.chain-id', esc(n.chainId)],
+    ['network.chain.block', esc(n.block)],
+    ['network.chain.validators', (n.validators || []).map((v) => `<span class="addr" data-copy="${esc(v)}">${esc(v)}</span>`).join('<br>') || '–'],
+    ['network.chain.dsas', (n.accountDsas || []).map(badge).join(' ') || '–'],
   ];
-  $('#net-kv').innerHTML = kv.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+  $('#net-kv').innerHTML = kv.map(([k, v]) => `<dt>${esc(tr(k))}</dt><dd>${v}</dd>`).join('');
 
   const dsaSelect = $('#account-dsa');
   if (dsaSelect && !dsaSelect.options.length) {
@@ -155,35 +147,36 @@ async function loadNodes() {
       $('#bench-nodes').placeholder = nodes.map((n) => n.url).join(',') || 'http://localhost:8545,http://localhost:8546';
     }
   } catch (e) {
-    $('#nodes').innerHTML = `<tbody><tr class="empty-row"><td>Could not list the nodes: ${esc(e.message)}</td></tr></tbody>`;
+    $('#nodes').innerHTML = `<tbody><tr class="empty-row"><td>${tr('network.nodes.error', { error: esc(e.message) })}</td></tr></tbody>`;
   }
 }
 
 function renderNodes() {
   const best = Math.max(0, ...state.nodes.filter((n) => n.reachable).map((n) => n.block));
   const rows = state.nodes.map((n) => {
-    const lag = n.reachable && best - n.block > 1 ? ` <span class="small">(${best - n.block} behind)</span>` : '';
+    const lag = n.reachable && best - n.block > 1 ? ` <span class="small">${tr('network.nodes.behind', { n: best - n.block })}</span>` : '';
     return `<tr>
-      <td><b>${esc(n.name)}</b>${n.primary ? ' <span class="small">primary</span>' : ''}</td>
+      <td><b>${esc(n.name)}</b>${n.primary ? ` <span class="small">${tr('common.primary')}</span>` : ''}</td>
       <td><span class="addr" data-copy="${esc(n.url)}">${esc(n.url)}</span></td>
-      <td><span class="status ${n.reachable ? 'success' : 'failed'}" title="${esc(n.error || '')}">${n.reachable ? 'up' : 'down'}</span></td>
+      <td><span class="status ${n.reachable ? 'success' : 'failed'}" title="${esc(n.error || '')}">${tr(n.reachable ? 'status.up' : 'status.down')}</span></td>
       <td class="num">${n.block != null ? `#${n.block}` : '–'}${lag}</td>
       <td class="num">${n.peers ?? '–'}</td>
       <td>${n.validator ? `<span class="addr" data-copy="${esc(n.validator)}">${esc(n.validator)}</span>` : '<span class="small">–</span>'}</td>
       <td><span class="small">${esc(n.p2p || '–')}</span></td>
-      <td class="num">${n.nodeKeyBytes ? `${n.nodeKeyBytes.toLocaleString()} B` : '–'}</td>
+      <td class="num">${n.nodeKeyBytes ? `${num(n.nodeKeyBytes)} B` : '–'}</td>
     </tr>`;
   }).join('');
-  $('#nodes').innerHTML = `<thead><tr><th>Node</th><th>RPC endpoint</th><th>Status</th><th class="num">Block</th><th class="num">Peers</th>
-    <th>Validator address</th><th>P2P address</th><th class="num">Node public key</th></tr></thead>
-    <tbody>${rows || '<tr class="empty-row"><td colspan="8">No nodes found.</td></tr>'}</tbody>`;
+  $('#nodes').innerHTML = `<thead><tr><th>${tr('common.node')}</th><th>${tr('network.nodes.rpc')}</th><th>${tr('common.status')}</th>
+    <th class="num">${tr('common.block')}</th><th class="num">${tr('network.nodes.peers')}</th><th>${tr('network.nodes.validator')}</th><th>${tr('network.nodes.p2p')}</th>
+    <th class="num">${tr('network.nodes.key')}</th></tr></thead>
+    <tbody>${rows || `<tr class="empty-row"><td colspan="8">${tr('network.nodes.empty')}</td></tr>`}</tbody>`;
 }
 
 $('#btn-rescan').addEventListener('click', async (e) => {
   e.target.disabled = true;
   try {
     const found = await api('/api/nodes/rescan', { method: 'POST' });
-    toast(`${found.length} node${found.length === 1 ? '' : 's'} found`);
+    toast(trn('network.nodes.found', found.length));
     await loadNodes();
   } catch (err) {
     toast(err.message);
@@ -217,7 +210,7 @@ async function loadDeployment() {
 function renderContracts() {
   const d = state.deployment;
   if (!d) {
-    $('#contracts').innerHTML = '<tbody><tr class="empty-row"><td>No Drex network deployed on this chain yet.</td></tr></tbody>';
+    $('#contracts').innerHTML = `<tbody><tr class="empty-row"><td>${tr('network.contracts.empty')}</td></tr></tbody>`;
     return;
   }
   const rows = [
@@ -226,7 +219,7 @@ function renderContracts() {
     ['SwapOneStep', d.swapOneStep], ['SwapTwoSteps', d.swapTwoSteps], ['AddressDiscovery', d.addressDiscovery],
     ...(d.realTokenizados || []).map((t) => [`RealTokenizado ${t.symbol} (${t.participant})`, t.address]),
   ];
-  $('#contracts').innerHTML = `<thead><tr><th>Contract</th><th>Address</th></tr></thead><tbody>${rows
+  $('#contracts').innerHTML = `<thead><tr><th>${tr('network.contracts.contract')}</th><th>${tr('common.address')}</th></tr></thead><tbody>${rows
     .map(([name, addr]) => `<tr><td>${esc(name)}</td><td><span class="addr" data-copy="${esc(addr)}">${esc(addr)}</span></td></tr>`)
     .join('')}</tbody>`;
 }
@@ -267,14 +260,8 @@ const ROLE_ICONS = {
   client: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   none: '<circle cx="12" cy="12" r="8"/><path d="M6.5 17.5l11-11"/>',
 };
-const ROLE_LABELS = {
-  bcb: 'BCB: administers Real Digital',
-  participant: 'Participant: enabled in Real Digital',
-  reserve: 'Reserve wallet of a Real Tokenizado',
-  client: 'Client: enabled in a Real Tokenizado',
-  none: 'Not enabled in any Drex token',
-};
-const ROLE_SHORT = { bcb: 'BCB', participant: 'participant', reserve: 'reserve', client: 'client' };
+/** Roles shown in the legend; each has the keys role.<role>.name and role.<role>.hint. */
+const LEGEND_ROLES = ['bcb', 'participant', 'reserve', 'client'];
 
 const roleIcon = (role, title) =>
   `<span class="role ${role}" title="${esc(title)}"><svg viewBox="0 0 24 24" aria-hidden="true">${ROLE_ICONS[role]}</svg></span>`;
@@ -282,16 +269,16 @@ const roleIcon = (role, title) =>
 /** Role icons of a balances row: what the wallet is on chain, as the snapshot read it. */
 function roleIcons(w) {
   const r = w.roles || { roles: [], clientOf: [] };
-  if (!r.roles.length) return roleIcon('none', ROLE_LABELS.none);
-  return r.roles.map((role) => roleIcon(role,
-    role === 'client' ? `Client of ${r.clientOf.join(', ')}: enabled in its Real Tokenizado` : ROLE_LABELS[role])).join('');
+  if (!r.roles.length) return roleIcon('none', tr('role.none.hint'));
+  return r.roles.map((role) => roleIcon(role, role === 'client'
+    ? tr('role.client.hint-tokens', { tokens: r.clientOf.join(', ') }) : tr(`role.${role}.hint`))).join('');
 }
 
-$('#role-legend').innerHTML = Object.entries(ROLE_SHORT)
-  .map(([role, label]) => `<span>${roleIcon(role, ROLE_LABELS[role])}${label}</span>`).join('');
+$('#role-legend').innerHTML = LEGEND_ROLES
+  .map((role) => `<span>${roleIcon(role, tr(`role.${role}.hint`))}${tr(`role.${role}.name`)}</span>`).join('');
 
 function amountHtml(h, tag = '') {
-  const frozen = h.frozen ? `<span class="frozen" title="Frozen: cannot be spent">frozen ${money(h.frozen)}</span>` : '';
+  const frozen = h.frozen ? `<span class="frozen" title="${tr('balances.frozen-hint')}">${tr('balances.frozen', { amount: money(h.frozen) })}</span>` : '';
   return `<span class="${h.balance ? '' : 'zero'}">${money(h.balance)}</span>${tag}${frozen}`;
 }
 
@@ -301,7 +288,7 @@ const tokenTag = (t) => ` <span class="token-tag" title="${esc(t.name)}">${esc(t
 function renderBalances(snap = state.snapshot, prev = null) {
   const table = $('#balances');
   if (!snap) {
-    table.innerHTML = '<tbody><tr class="empty-row"><td>Balances appear once a Drex network is deployed.</td></tr></tbody>';
+    table.innerHTML = `<tbody><tr class="empty-row"><td>${tr('balances.none-deployed')}</td></tr></tbody>`;
     $('#balances-meta').textContent = '';
     return;
   }
@@ -338,13 +325,13 @@ function renderBalances(snap = state.snapshot, prev = null) {
     }).join('');
   const perToken = (values) => rts.map((t) => `<div class="rt-line">${money(values[t.symbol] || 0)}${tokenTag(t)}</div>`).join('')
     || money(0);
-  table.innerHTML = `<thead><tr><th>Wallet</th><th>Signs with</th><th>Address</th>
-      <th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th><th class="num" title="Real Tokenizado, tagged with its token">RT</th></tr></thead>
-    <tbody>${rows || '<tr class="empty-row"><td colspan="5">No wallets with a balance.</td></tr>'}</tbody>
-    <tfoot><tr><td colspan="3">Sum of the wallets shown</td><td class="num">${money(rdSum)}</td><td class="num rt">${perToken(rtSums)}</td></tr>
-    <tr class="supply"><td colspan="3">Total supply on chain</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td><td class="num rt">${perToken(snap.totalSupply)}</td></tr></tfoot>`;
+  table.innerHTML = `<thead><tr><th>${tr('balances.wallet')}</th><th>${tr('common.signs-with')}</th><th>${tr('common.address')}</th>
+      <th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th><th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
+    <tbody>${rows || `<tr class="empty-row"><td colspan="5">${tr('balances.empty')}</td></tr>`}</tbody>
+    <tfoot><tr><td colspan="3">${tr('balances.sum')}</td><td class="num">${money(rdSum)}</td><td class="num rt">${perToken(rtSums)}</td></tr>
+    <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td><td class="num rt">${perToken(snap.totalSupply)}</td></tr></tfoot>`;
 
-  $('#balances-meta').textContent = `Block #${snap.blockNumber}`;
+  $('#balances-meta').textContent = tr('common.block-number', { n: snap.blockNumber });
 }
 
 $('#hide-empty').addEventListener('change', () => renderBalances());
@@ -366,13 +353,14 @@ function renderAccounts() {
     return `<tr>
       <td><span class="wallet-name">${roles}${esc(a.name)}</span></td>
       <td>${badge(a.signing)}</td>
-      <td>${a.format === 'STANDARD' ? 'standard 0x02' : 'flexible 0x42'}</td>
+      <td>${a.format === 'STANDARD' ? `${tr('common.standard')} 0x02` : `${tr('common.flexible')} 0x42`}</td>
       <td><span class="addr" data-copy="${esc(a.address)}">${esc(a.address)}</span></td>
-      <td class="num">${a.publicKeyBytes.toLocaleString()} B</td>
+      <td class="num">${num(a.publicKeyBytes)} B</td>
     </tr>`;
   }).join('');
-  $('#accounts').innerHTML = `<thead><tr><th>Name</th><th>Signs with</th><th>Transactions</th><th>Address</th><th class="num">Public key</th></tr></thead>
-    <tbody>${rows || '<tr class="empty-row"><td colspan="5">No accounts yet. Create one, or set up the demo network.</td></tr>'}</tbody>`;
+  $('#accounts').innerHTML = `<thead><tr><th>${tr('common.name')}</th><th>${tr('common.signs-with')}</th><th>${tr('txs.title')}</th><th>${tr('common.address')}</th>
+    <th class="num">${tr('common.public-key')}</th></tr></thead>
+    <tbody>${rows || `<tr class="empty-row"><td colspan="5">${tr('accounts.empty')}</td></tr>`}</tbody>`;
 }
 
 function updateStandardToggle() {
@@ -384,7 +372,7 @@ function updateStandardToggle() {
 }
 $('#account-dsa').addEventListener('change', updateStandardToggle);
 
-$('#dsa-notes').innerHTML = Object.entries(DSA_NOTES).map(([d, note]) => `<dt>${badge(d)}</dt><dd>${esc(note)}</dd>`).join('');
+$('#dsa-notes').innerHTML = ALL_DSAS.map((d) => `<dt>${badge(d)}</dt><dd>${esc(dsaNote(d))}</dd>`).join('');
 
 $('#account-form').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -393,7 +381,8 @@ $('#account-form').addEventListener('submit', async (e) => {
   try {
     const a = await api('/api/accounts', { method: 'POST', body: { name: form.name.value.trim(), dsa: form.dsa.value, standard: form.standard.checked } });
     out.className = 'op-result ok';
-    out.innerHTML = `Created <b>${esc(a.name)}</b> (${esc(a.signing)}) at <span class="addr" data-copy="${esc(a.address)}">${esc(a.address)}</span>`;
+    out.innerHTML = tr('accounts.new.created', { name: `<b>${esc(a.name)}</b>`, signing: esc(a.signing),
+      address: `<span class="addr" data-copy="${esc(a.address)}">${esc(a.address)}</span>` });
     form.name.value = '';
     await loadAccounts();
     refreshBalances();
@@ -408,7 +397,7 @@ $('#account-form').addEventListener('submit', async (e) => {
 async function loadOperations() {
   state.operations = (await api('/api/operations')).sort((a, b) => a.flow - b.flow);
   $('#op-select').innerHTML = state.operations
-    .map((o) => `<option value="${esc(o.id)}">${o.flow}. ${esc(o.label)}</option>`).join('');
+    .map((o) => `<option value="${esc(o.id)}">${o.flow}. ${esc(opLabel(o))}</option>`).join('');
   const preferred = state.operations.find((o) => o.id === 'swap');
   if (preferred) $('#op-select').value = preferred.id;
   renderOperationForm();
@@ -452,7 +441,7 @@ function renderOperationForm() {
   const op = state.operations.find((o) => o.id === $('#op-select').value);
   const form = $('#op-form');
   if (!op) { form.innerHTML = ''; return; }
-  $('#op-desc').innerHTML = `<span class="flow">Flow ${op.flow}</span>${esc(op.description)} Signed by ${esc(op.signer)}.`;
+  $('#op-desc').innerHTML = `<span class="flow">${tr('op.flow', { n: op.flow })}</span>${esc(opDescription(op))} ${esc(tr('op.signed-by', { who: opSigner(op) }))}`;
 
   const previous = Object.fromEntries(new FormData(form).entries());
   const accountOptions = state.accounts.map((a) => `<option value="${esc(a.name)}">${esc(a.name)} · ${esc(a.signing)}</option>`).join('');
@@ -466,8 +455,8 @@ function renderOperationForm() {
       case 'wallet':
         // A real select of the simulated accounts; "Other address" swaps in a text box for any 0x address.
         input = `<select name="${f.name}" data-wallet="${f.name}" required>${walletOptions}
-            <option value="${OTHER_WALLET}">Other address…</option></select>
-          <input class="wallet-other hidden" data-for="${f.name}" placeholder="0x address" pattern="0x[0-9a-fA-F]{40}">`;
+            <option value="${OTHER_WALLET}">${tr('op.other-address')}</option></select>
+          <input class="wallet-other hidden" data-for="${f.name}" placeholder="${tr('op.address-placeholder')}" pattern="0x[0-9a-fA-F]{40}">`;
         break;
       case 'token':
       case 'rt':
@@ -483,14 +472,14 @@ function renderOperationForm() {
       default:
         input = `<input name="${f.name}" required>`;
     }
-    return `<label class="field"><span>${esc(f.label)}</span>${input}</label>`;
+    return `<label class="field"><span>${esc(fieldLabel(op, f))}</span>${input}</label>`;
   }).join('');
 
   const nodeOptions = (state.nodes.length ? state.nodes : [{ name: 'node-1', url: state.network?.rpc || '', primary: true, reachable: true }])
-    .map((n) => `<option value="${esc(n.name)}" ${n.primary ? 'selected' : ''} ${n.reachable === false ? 'disabled' : ''}>${esc(n.name)} · ${esc(n.url.replace(/^https?:\/\//, ''))}${n.primary ? ' (primary)' : ''}${n.reachable === false ? ' – down' : ''}</option>`).join('');
-  const nodeField = `<label class="field"><span>Send to node</span><select name="node">${nodeOptions}</select></label>`;
+    .map((n) => `<option value="${esc(n.name)}" ${n.primary ? 'selected' : ''} ${n.reachable === false ? 'disabled' : ''}>${esc(n.name)} · ${esc(n.url.replace(/^https?:\/\//, ''))}${n.primary ? ` (${tr('common.primary')})` : ''}${n.reachable === false ? ` – ${tr('status.down')}` : ''}</option>`).join('');
+  const nodeField = `<label class="field"><span>${tr('op.send-to-node')}</span><select name="node">${nodeOptions}</select></label>`;
 
-  form.innerHTML = `${fields}${nodeField}<button class="primary" type="submit">Sign and send</button>`;
+  form.innerHTML = `${fields}${nodeField}<button class="primary" type="submit">${tr('op.submit')}</button>`;
   for (const [k, v] of Object.entries(previous)) {
     const wallet = form.querySelector(`select[data-wallet="${k}"]`);
     if (wallet) setWallet(form, k, v);
@@ -524,18 +513,19 @@ $('#op-form').addEventListener('submit', async (e) => {
   const button = form.querySelector('button');
   button.disabled = true;
   out.className = 'op-result busy';
-  out.textContent = 'Signing and sending; waiting for the block that includes it…';
+  out.textContent = tr('op.sending');
   try {
     const r = await api(`/api/operations/${op}`, { method: 'POST', body: params });
     out.className = `op-result ${r.ok ? 'ok' : 'err'}`;
+    const spec = state.operations.find((o) => o.id === op);
     out.innerHTML = r.ok
-      ? `${esc(r.message)}${r.signer ? `, signed by <b>${esc(r.signer)}</b>` : ''}${r.node ? ` via ${esc(r.node)}` : ''}.${(r.transactions || [])
-        .map((h) => ` <button class="link" data-details="${esc(h)}" title="Show details">${esc(shortAddr(h))}</button>`).join('')}`
-      : `Failed: ${esc(r.message)}`;
+      ? `${esc(spec ? tr('op.done', { op: opLabel(spec) }) : r.message)}${r.signer ? tr('op.result-signed-by', { who: `<b>${esc(r.signer)}</b>` }) : ''}${r.node ? tr('op.result-via', { node: esc(r.node) }) : ''}.${(r.transactions || [])
+        .map((h) => ` <button class="link" data-details="${esc(h)}" title="${tr('op.show-details')}">${esc(shortAddr(h))}</button>`).join('')}`
+      : tr('common.failed', { error: esc(r.message) });
     refreshBalances();
   } catch (err) {
     out.className = 'op-result err';
-    out.textContent = `Failed: ${err.message}`;
+    out.textContent = tr('common.failed', { error: err.message });
   } finally {
     button.disabled = false;
   }
@@ -548,27 +538,39 @@ async function loadTransactions() {
   renderTransactions();
 }
 
+/** Steps the server logs under a name of their own, not an operation's. */
+const JOB_STEPS = { 'Demo setup': 'job-step.demo', 'Network setup': 'job-step.deploy' };
+
+/** Name of an operation as the server logged it (its English label), in the interface's language. */
+function operationName(label) {
+  const op = state.operations.find((o) => o.label === label);
+  if (op) return opLabel(op);
+  return JOB_STEPS[label] ? tr(JOB_STEPS[label]) : label;
+}
+
 function renderTransactions() {
-  const rows = [...state.txs.values()].sort((a, b) => b.id - a.id).slice(0, 200).map((t) => {
-    const gas = t.gasUsed != null ? `${t.gasUsed.toLocaleString()} <span class="small">/ ${t.gasLimit.toLocaleString()}</span>` : `<span class="small">limit ${t.gasLimit.toLocaleString()}</span>`;
-    const keyBytes = t.publicKeyBytes ? `${t.publicKeyBytes.toLocaleString()} B` : 'recovered';
+  const rows = [...state.txs.values()].sort((a, b) => b.id - a.id).slice(0, 200).map((tx) => {
+    const gas = tx.gasUsed != null ? `${num(tx.gasUsed)} <span class="small">/ ${num(tx.gasLimit)}</span>`
+      : `<span class="small">${tr('txs.gas-limit', { n: num(tx.gasLimit) })}</span>`;
+    const keyBytes = tx.publicKeyBytes ? `${num(tx.publicKeyBytes)} B` : tr('txs.key-recovered');
     return `<tr>
-      <td class="small">${time(t.time)}</td>
-      <td>${esc(t.operation || '–')}</td>
-      <td>${esc(t.account)}</td>
-      <td>${badge(t.dsa)} <span class="small">${esc(t.type)}</span></td>
-      <td class="num">${(t.size / 1024).toFixed(1)} KB</td>
-      <td class="num">${t.signatureBytes.toLocaleString()} B <span class="small">/ ${keyBytes}</span></td>
+      <td class="small">${time(tx.time)}</td>
+      <td>${esc(tx.operation ? operationName(tx.operation) : '–')}</td>
+      <td>${esc(tx.account)}</td>
+      <td>${badge(tx.dsa)} <span class="small">${esc(tx.type)}</span></td>
+      <td class="num">${num(tx.size / 1024, 1)} KB</td>
+      <td class="num">${num(tx.signatureBytes)} B <span class="small">/ ${keyBytes}</span></td>
       <td class="num">${gas}</td>
-      <td><span class="status ${esc(t.status)}" title="${esc(t.error || '')}">${esc(t.status)}</span>${t.block != null ? ` <span class="small">#${t.block}</span>` : ''}</td>
-      <td><span class="hash" data-copy="${esc(t.hash)}" title="${esc(t.hash)}">${esc(shortAddr(t.hash))}</span></td>
-      <td>${esc(t.node || '–')}</td>
-      <td>${t.hash && t.status !== 'rejected' ? `<button class="small-btn" data-details="${esc(t.hash)}" data-node="${esc(t.node || '')}">Details</button>` : ''}</td>
+      <td><span class="status ${esc(tx.status)}" title="${esc(tx.error || '')}">${esc(statusLabel(tx.status))}</span>${tx.block != null ? ` <span class="small">#${tx.block}</span>` : ''}</td>
+      <td><span class="hash" data-copy="${esc(tx.hash)}" title="${esc(tx.hash)}">${esc(shortAddr(tx.hash))}</span></td>
+      <td>${esc(tx.node || '–')}</td>
+      <td>${tx.hash && tx.status !== 'rejected' ? `<button class="small-btn" data-details="${esc(tx.hash)}" data-node="${esc(tx.node || '')}">${tr('txs.details')}</button>` : ''}</td>
     </tr>`;
   }).join('');
-  $('#txs').innerHTML = `<thead><tr><th>Time</th><th>Operation</th><th>Account</th><th>Signs with</th><th class="num">Size</th>
-    <th class="num">Signature / key</th><th class="num">Gas used / limit</th><th>Status</th><th>Hash</th><th>Node</th><th aria-label="Details"></th></tr></thead>
-    <tbody>${rows || '<tr class="empty-row"><td colspan="11">No transactions yet. Run an operation.</td></tr>'}</tbody>`;
+  $('#txs').innerHTML = `<thead><tr><th>${tr('common.time')}</th><th>${tr('common.operation')}</th><th>${tr('txs.account')}</th><th>${tr('common.signs-with')}</th>
+    <th class="num">${tr('txs.size')}</th><th class="num">${tr('txs.signature-key')}</th><th class="num">${tr('txs.gas')}</th><th>${tr('common.status')}</th>
+    <th>${tr('txs.hash')}</th><th>${tr('common.node')}</th><th aria-label="${tr('txs.details')}"></th></tr></thead>
+    <tbody>${rows || `<tr class="empty-row"><td colspan="11">${tr('txs.empty')}</td></tr>`}</tbody>`;
 }
 
 // ------------------------------------------------------------------ transaction details
@@ -577,7 +579,7 @@ function renderTransactions() {
 function addressBook() {
   const book = new Map();
   const put = (addr, name, kind) => { if (addr) book.set(addr.toLowerCase(), { name, kind }); };
-  put(`0x${'0'.repeat(40)}`, 'zero address (mint / burn)', 'zero');
+  put(`0x${'0'.repeat(40)}`, tr('details.zero-address'), 'zero');
   const d = state.deployment;
   if (d) {
     put(d.realDigital, 'RealDigital', 'contract');
@@ -590,7 +592,7 @@ function addressBook() {
     put(d.addressDiscovery, 'AddressDiscovery', 'contract');
     for (const t of d.realTokenizados || []) put(t.address, `RealTokenizado ${t.symbol}`, 'contract');
   }
-  for (const n of state.nodes) if (n.validator) put(n.validator, `validator ${n.name}`, 'validator');
+  for (const n of state.nodes) if (n.validator) put(n.validator, tr('details.validator', { name: n.name }), 'validator');
   for (const a of state.accounts) put(a.address, a.name, 'account');
   return book;
 }
@@ -604,7 +606,7 @@ function addressHtml(addr, book) {
 
 const hexBytes = (h) => (h && h.length > 2 ? (h.length - 2) / 2 : 0);
 const qty = (h) => (h == null ? null : BigInt(h));
-const fmtInt = (n) => (n == null ? '–' : BigInt(n).toLocaleString('en-US'));
+const fmtInt = (n) => (n == null ? '–' : BigInt(n).toLocaleString(LOCALE));
 
 /** Cents as R$ with BigInt precision. */
 function brlBig(cents) {
@@ -672,7 +674,7 @@ function valueHtml(param, decoded, book, tokenish) {
     case 'bool': return v.value ? 'true' : 'false';
     case 'uint':
     case 'int': {
-      const raw = v.value.toLocaleString('en-US');
+      const raw = v.value.toLocaleString(LOCALE);
       const money = tokenish && /amount|value|balance|wad/i.test(param.name) && v.value < 10n ** 30n;
       return money ? `<b>${esc(brlBig(v.value))}</b> <span class="small">${esc(raw)}</span>` : esc(raw);
     }
@@ -688,18 +690,18 @@ function valueHtml(param, decoded, book, tokenish) {
 }
 
 function paramsTable(rows, book, tokenish) {
-  if (!rows.length) return '<p class="small">No arguments.</p>';
-  return `<table class="data compact"><thead><tr><th>Name</th><th>Type</th><th>Value</th></tr></thead><tbody>${rows
-    .map((r) => `<tr><td>${esc(r.name || '–')}${r.indexed ? ' <span class="small">indexed</span>' : ''}</td><td><code>${esc(r.type)}</code></td>
+  if (!rows.length) return `<p class="small">${tr('details.no-arguments')}</p>`;
+  return `<table class="data compact"><thead><tr><th>${tr('common.name')}</th><th>${tr('details.type')}</th><th>${tr('details.value')}</th></tr></thead><tbody>${rows
+    .map((r) => `<tr><td>${esc(r.name || '–')}${r.indexed ? ` <span class="small">${tr('details.indexed')}</span>` : ''}</td><td><code>${esc(r.type)}</code></td>
       <td>${r.decoded ? valueHtml(r, r.decoded, book, tokenish) : `<span class="addr">${esc(r.raw)}</span>`}</td></tr>`).join('')}</tbody></table>`;
 }
 
-const kvHtml = (rows) => `<dl class="kv">${rows.filter(Boolean).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
+const kvHtml = (rows) => `<dl class="kv">${rows.filter(Boolean).map(([k, v]) => `<dt>${esc(tr(k))}</dt><dd>${v}</dd>`).join('')}</dl>`;
 
 function hexBlock(label, hex) {
   if (!hex || hex === '0x') return '';
-  return `<details class="hexblock"><summary>${esc(label)} <span class="small">${hexBytes(hex).toLocaleString()} bytes</span></summary>
-    <pre class="raw">${esc(hex)}</pre><button class="small-btn" data-copy="${esc(hex)}">Copy</button></details>`;
+  return `<details class="hexblock"><summary>${esc(tr(label))} <span class="small">${tr('common.bytes', { n: num(hexBytes(hex)) })}</span></summary>
+    <pre class="raw">${esc(hex)}</pre><button class="small-btn" data-copy="${esc(hex)}">${tr('common.copy')}</button></details>`;
 }
 
 function isTokenContract(name) {
@@ -719,18 +721,18 @@ function renderDetails(d) {
   const input = tx.input || '0x';
   let callHtml;
   if (!tx.to) {
-    callHtml = `<p>Contract creation. ${rc?.contractAddress ? `New contract at ${addressHtml(rc.contractAddress, book)}.` : ''}</p>${hexBlock('Init code', input)}`;
+    callHtml = `<p>${tr('details.creation')} ${rc?.contractAddress ? tr('details.new-contract', { address: addressHtml(rc.contractAddress, book) }) : ''}</p>${hexBlock('details.init-code', input)}`;
   } else if (input === '0x') {
-    callHtml = '<p class="small">Plain value transfer: no call data.</p>';
+    callHtml = `<p class="small">${tr('details.plain-transfer')}</p>`;
   } else {
     const selector = input.slice(0, 10).toLowerCase();
     const fn = state.abi?.functions?.[selector];
     const args = fn ? decodeParams(fn.inputs, input.slice(10)) : null;
     callHtml = fn
-      ? `<p class="fn"><code>${esc(fn.signature)}</code> <span class="small">selector ${esc(selector)}${toInfo ? '' : ` · ${esc(fn.contracts.join(', '))}`}</span></p>
-         ${args ? paramsTable(args, book, isTokenContract(toInfo?.name || fn.contracts[0])) : '<p class="small">The arguments do not match the ABI.</p>'}`
-      : `<p class="small">Unknown function selector <code>${esc(selector)}</code>.</p>`;
-    callHtml += hexBlock('Call data', input);
+      ? `<p class="fn"><code>${esc(fn.signature)}</code> <span class="small">${tr('details.selector', { selector: esc(selector) })}${toInfo ? '' : ` · ${esc(fn.contracts.join(', '))}`}</span></p>
+         ${args ? paramsTable(args, book, isTokenContract(toInfo?.name || fn.contracts[0])) : `<p class="small">${tr('details.abi-mismatch')}</p>`}`
+      : `<p class="small">${tr('details.unknown-selector', { selector: `<code>${esc(selector)}</code>` })}</p>`;
+    callHtml += hexBlock('details.call-data', input);
   }
 
   // Gas
@@ -739,27 +741,27 @@ function renderDetails(d) {
   const usedPct = gasUsed != null && gasLimit ? Number((gasUsed * 1000n) / gasLimit) / 10 : null;
   const blockPct = gasUsed != null && d.blockGasLimit ? (Number(gasUsed) * 100) / d.blockGasLimit : null;
   const gasHtml = kvHtml([
-    ['Gas used', gasUsed != null ? `${fmtInt(gasUsed)} <span class="small">of ${fmtInt(gasLimit)} limit (${usedPct}%)</span>
-      <span class="meter"><span style="width:${Math.min(100, usedPct)}%"></span></span>` : `<span class="small">limit ${fmtInt(gasLimit)}, not mined yet</span>`],
-    blockPct != null && ['Share of the block', `${blockPct.toFixed(2)}% <span class="small">of ${d.blockGasLimit.toLocaleString('en-US')} gas</span>`],
-    ['Effective gas price', `${fmtInt(qty(rc?.effectiveGasPrice ?? tx.gasPrice))} wei`],
-    tx.maxFeePerGas && ['Max fee / priority fee', `${fmtInt(qty(tx.maxFeePerGas))} / ${fmtInt(qty(tx.maxPriorityFeePerGas))} wei`],
-    hasReceipt && ['Cumulative gas in block', fmtInt(qty(rc.cumulativeGasUsed))],
+    ['details.gas.used', gasUsed != null ? `${fmtInt(gasUsed)} <span class="small">${tr('details.gas.of-limit', { limit: fmtInt(gasLimit), pct: num(usedPct) })}</span>
+      <span class="meter"><span style="width:${Math.min(100, usedPct)}%"></span></span>` : `<span class="small">${tr('details.gas.not-mined', { n: fmtInt(gasLimit) })}</span>`],
+    blockPct != null && ['details.gas.block-share', `${num(blockPct, 2)}% <span class="small">${tr('details.gas.of-block', { gas: num(d.blockGasLimit) })}</span>`],
+    ['details.gas.price', `${fmtInt(qty(rc?.effectiveGasPrice ?? tx.gasPrice))} wei`],
+    tx.maxFeePerGas && ['details.gas.fees', `${fmtInt(qty(tx.maxFeePerGas))} / ${fmtInt(qty(tx.maxPriorityFeePerGas))} wei`],
+    hasReceipt && ['details.gas.cumulative', fmtInt(qty(rc.cumulativeGasUsed))],
   ]);
 
   // Signature
   const keyBytes = hexBytes(tx.publicKey);
   const sigBytes = flexible ? hexBytes(tx.signature) : 65;
   const sigHtml = kvHtml([
-    ['Algorithm', `${badge(d.dsa || tx.dsaType || 'unknown')} ${d.quantumResistant ? '<span class="small">quantum resistant</span>' : '<span class="small">classical: forgeable by a quantum computer</span>'}`],
-    ['Transaction type', flexible ? '<code>0x42</code> flexible (besu-pqc-ppi)' : `<code>${esc(tx.type)}</code> standard`],
-    flexible && ['DSA id', `<code>${esc(tx.dsaType)}</code>`],
-    ['Signature', `${sigBytes.toLocaleString()} bytes`],
-    ['Public key carried', keyBytes ? `${keyBytes.toLocaleString()} bytes${d.hybrid ? ' <span class="small">(post-quantum half; the ECDSA half is recovered)</span>' : ''}`
-      : '<span class="small">none: recovered from the ECDSA signature</span>'],
-    d.sent && ['Encoded size', `${d.sent.size.toLocaleString()} bytes`],
-    d.sent && ['Signing time', `${d.sent.signMs.toFixed(2)} ms`],
-  ]) + hexBlock('Public key', tx.publicKey) + hexBlock('Signature', flexible ? tx.signature : (tx.r ? `${tx.r}${tx.s.slice(2)}${tx.v.slice(2).padStart(2, "0")}` : ''));
+    ['details.sig.algorithm', `${badge(d.dsa || tx.dsaType || tr('details.sig.unknown'))} <span class="small">${tr(d.quantumResistant ? 'details.sig.quantum-resistant' : 'details.sig.classical')}</span>`],
+    ['details.sig.type', flexible ? `<code>0x42</code> ${tr('details.sig.flexible')}` : `<code>${esc(tx.type)}</code> ${tr('common.standard')}`],
+    flexible && ['details.sig.dsa-id', `<code>${esc(tx.dsaType)}</code>`],
+    ['details.sig.title', tr('common.bytes', { n: num(sigBytes) })],
+    ['details.sig.key', keyBytes ? `${tr('common.bytes', { n: num(keyBytes) })}${d.hybrid ? ` <span class="small">${tr('details.sig.hybrid-key')}</span>` : ''}`
+      : `<span class="small">${tr('details.sig.no-key')}</span>`],
+    d.sent && ['details.sig.size', tr('common.bytes', { n: num(d.sent.size) })],
+    d.sent && ['details.sig.time', `${num(d.sent.signMs, 2)} ms`],
+  ]) + hexBlock('common.public-key', tx.publicKey) + hexBlock('details.sig.title', flexible ? tx.signature : (tx.r ? `${tx.r}${tx.s.slice(2)}${tx.v.slice(2).padStart(2, "0")}` : ''));
 
   // Events
   const logs = rc?.logs || [];
@@ -781,50 +783,50 @@ function renderDetails(d) {
       });
     }
     return `<div class="event">
-      <div class="event-head"><span class="small">#${Number(log.logIndex)}</span> <b>${esc(ev ? ev.name : 'Unknown event')}</b>
-        <span class="small">emitted by</span> ${addressHtml(log.address, book)}</div>
+      <div class="event-head"><span class="small">#${Number(log.logIndex)}</span> <b>${esc(ev ? ev.name : tr('details.events.unknown'))}</b>
+        <span class="small">${tr('details.events.emitted-by')}</span> ${addressHtml(log.address, book)}</div>
       ${rows ? paramsTable(rows, book, isTokenContract(emitter?.name)) : `<pre class="raw">${esc(JSON.stringify({ topics: log.topics, data: log.data }, null, 2))}</pre>`}
     </div>`;
-  }).join('') : `<p class="small">${hasReceipt ? 'No events.' : 'Not mined yet.'}</p>`;
+  }).join('') : `<p class="small">${tr(hasReceipt ? 'details.events.none' : 'details.not-mined')}</p>`;
 
   // Overview
   const when = d.blockTimestamp ? new Date(d.blockTimestamp * 1000) : null;
   const overview = kvHtml([
-    ['Status', `<span class="status ${status}">${status}</span>`],
-    ['Block', hasReceipt ? `#${Number(rc.blockNumber).toLocaleString('en-US')} <span class="small">position ${Number(rc.transactionIndex)}${d.blockTransactions != null ? ` of ${d.blockTransactions}` : ''}</span>` : '–'],
-    when && ['Time', `${when.toLocaleString()}`],
-    ['From', addressHtml(tx.from, book)],
-    ['To', tx.to ? addressHtml(tx.to, book) : '<span class="small">contract creation</span>'],
-    ['Value', `${fmtInt(qty(tx.value))} wei`],
-    ['Nonce', String(Number(tx.nonce))],
-    ['Chain id', String(Number(tx.chainId))],
-    d.sent && ['Sent from this GUI', `${esc(d.sent.operation || '–')}${d.sent.node ? ` <span class="small">via ${esc(d.sent.node)}</span>` : ''}`],
-    ['Data from', `${esc(d.node)} <span class="small">${esc(d.nodeUrl)}</span>`],
-    hasReceipt && ['Block hash', `<span class="addr" data-copy="${esc(rc.blockHash)}">${esc(rc.blockHash)}</span>`],
+    ['common.status', `<span class="status ${status}">${statusLabel(status)}</span>`],
+    ['common.block', hasReceipt ? `#${num(Number(rc.blockNumber))} <span class="small">${tr('details.position', { i: Number(rc.transactionIndex) })}${d.blockTransactions != null ? tr('details.position-of', { n: d.blockTransactions }) : ''}</span>` : '–'],
+    when && ['common.time', `${when.toLocaleString(LOCALE)}`],
+    ['details.from', addressHtml(tx.from, book)],
+    ['details.to', tx.to ? addressHtml(tx.to, book) : `<span class="small">${tr('details.to-creation')}</span>`],
+    ['details.value', `${fmtInt(qty(tx.value))} wei`],
+    ['details.nonce', String(Number(tx.nonce))],
+    ['common.chain-id', String(Number(tx.chainId))],
+    d.sent && ['details.sent', `${esc(d.sent.operation ? operationName(d.sent.operation) : '–')}${d.sent.node ? ` <span class="small">${tr('details.via', { node: esc(d.sent.node) })}</span>` : ''}`],
+    ['details.data-from', `${esc(d.node)} <span class="small">${esc(d.nodeUrl)}</span>`],
+    hasReceipt && ['details.block-hash', `<span class="addr" data-copy="${esc(rc.blockHash)}">${esc(rc.blockHash)}</span>`],
   ]);
 
-  const raw = (title, method, obj) => `<details class="hexblock"><summary>${esc(title)} <code>${method}</code></summary>
-    <pre class="raw">${esc(JSON.stringify(obj, null, 2))}</pre><button class="small-btn" data-copy="${esc(JSON.stringify(obj, null, 2))}">Copy JSON</button></details>`;
+  const raw = (title, method, obj) => `<details class="hexblock"><summary>${esc(tr(title))} <code>${method}</code></summary>
+    <pre class="raw">${esc(JSON.stringify(obj, null, 2))}</pre><button class="small-btn" data-copy="${esc(JSON.stringify(obj, null, 2))}">${tr('details.copy-json')}</button></details>`;
 
-  $('#tx-dialog-title').innerHTML = `Transaction <span class="status ${status}">${status}</span>`;
+  $('#tx-dialog-title').innerHTML = `${tr('details.title')} <span class="status ${status}">${statusLabel(status)}</span>`;
   $('#tx-dialog-body').innerHTML = `
-    <p class="txhash"><span class="hash" data-copy="${esc(tx.hash)}" title="Copy">${esc(tx.hash)}</span></p>
+    <p class="txhash"><span class="hash" data-copy="${esc(tx.hash)}" title="${tr('common.copy')}">${esc(tx.hash)}</span></p>
     <div class="detail-grid">
-      <section class="detail"><h3>Overview</h3>${overview}</section>
-      <section class="detail"><h3>Call${toInfo ? ` <span class="small">to ${esc(toInfo.name)}</span>` : ''}</h3>${callHtml}</section>
-      <section class="detail"><h3>Signature</h3>${sigHtml}</section>
-      <section class="detail"><h3>Gas</h3>${gasHtml}</section>
-      <section class="detail wide"><h3>Events <span class="small">${logs.length}</span></h3>${eventsHtml}</section>
-      <section class="detail wide"><h3>Raw JSON-RPC responses</h3>
-        ${raw('Transaction', 'eth_getTransactionByHash', tx)}
-        ${raw('Receipt', 'eth_getTransactionReceipt', d.receipt)}</section>
+      <section class="detail"><h3>${tr('tab.overview')}</h3>${overview}</section>
+      <section class="detail"><h3>${tr('details.call')}${toInfo ? ` <span class="small">${tr('details.call-to', { name: esc(toInfo.name) })}</span>` : ''}</h3>${callHtml}</section>
+      <section class="detail"><h3>${tr('details.sig.title')}</h3>${sigHtml}</section>
+      <section class="detail"><h3>${tr('details.gas.title')}</h3>${gasHtml}</section>
+      <section class="detail wide"><h3>${tr('details.events.title')} <span class="small">${logs.length}</span></h3>${eventsHtml}</section>
+      <section class="detail wide"><h3>${tr('details.raw')}</h3>
+        ${raw('details.title', 'eth_getTransactionByHash', tx)}
+        ${raw('details.receipt', 'eth_getTransactionReceipt', d.receipt)}</section>
     </div>`;
 }
 
 async function showDetails(hash, node) {
   const dialog = $('#tx-dialog');
-  $('#tx-dialog-title').textContent = 'Transaction';
-  $('#tx-dialog-body').innerHTML = '<p class="muted">Loading…</p>';
+  $('#tx-dialog-title').textContent = tr('details.title');
+  $('#tx-dialog-body').innerHTML = `<p class="muted">${tr('app.loading')}</p>`;
   if (!dialog.open) dialog.showModal();
   try {
     if (!state.abi) state.abi = await api('/api/abi');
@@ -898,9 +900,9 @@ async function loadJobs() {
 function renderJobs() {
   const jobs = [...state.jobs.values()].sort((a, b) => b.id - a.id);
   $('#jobs').innerHTML = jobs.length ? jobs.map((j) => `<div class="job ${j.id === state.selectedJob ? 'selected' : ''}" data-id="${j.id}">
-      <span><b>${esc(j.title)}</b> <span class="status ${esc(j.status)}">${esc(j.status)}</span></span>
+      <span><b>${esc(jobTitle(j))}</b> <span class="status ${esc(j.status)}">${esc(statusLabel(j.status))}</span></span>
       <span class="when">${time(j.startedAt)}${j.endedAt ? ` – ${time(j.endedAt)}` : ''}</span>
-    </div>`).join('') : '<p class="muted">No runs yet.</p>';
+    </div>`).join('') : `<p class="muted">${tr('eval.runs.empty')}</p>`;
   document.querySelectorAll('.job').forEach((el) => el.addEventListener('click', () => selectJob(Number(el.dataset.id))));
   const running = jobs.some((j) => j.status === 'running');
   document.querySelectorAll('[data-job], #btn-demo, #btn-deploy').forEach((b) => { b.disabled = running; });
@@ -918,12 +920,12 @@ function renderJobDetail() {
   const job = state.jobs.get(state.selectedJob);
   $('#job-detail').classList.toggle('hidden', !job);
   if (!job) return;
-  $('#job-title').textContent = job.title;
+  $('#job-title').textContent = jobTitle(job);
   $('#job-status').className = `status ${job.status}`;
-  $('#job-status').textContent = job.status + (job.error ? `: ${job.error}` : '');
+  $('#job-status').textContent = statusLabel(job.status) + (job.error ? `: ${job.error}` : '');
   const log = $('#job-log');
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
-  log.textContent = (job.log || []).join('\n') || 'Starting…';
+  log.textContent = (job.log || []).join('\n') || tr('app.starting');
   if (atBottom) log.scrollTop = log.scrollHeight;
   $('#job-report').innerHTML = job.report ? markdown(job.report) : '';
 }
@@ -933,7 +935,7 @@ function showSetupJob(id) {
   setupJob = id;
   const box = $('#setup-job');
   box.classList.remove('hidden');
-  box.innerHTML = '<pre class="console" id="setup-log">Starting…</pre>';
+  box.innerHTML = `<pre class="console" id="setup-log">${tr('app.starting')}</pre>`;
 }
 
 function onJobLog({ id, line }) {
@@ -957,7 +959,7 @@ async function onJob(summary) {
     if (summary.id === state.selectedJob) selectJob(summary.id);
     if (summary.id === setupJob) {
       if (summary.status === 'done') {
-        toast('Drex network ready');
+        toast(tr('setup.ready'));
         $('#setup-job').classList.add('hidden');
         setupJob = null;
       }
@@ -1042,6 +1044,8 @@ function connectEvents() {
 // ------------------------------------------------------------------ start
 
 (async function start() {
+  $('#runs-note').textContent = tr('eval.runs.subtitle')
+    + (LANG === FALLBACK_LANGUAGE ? '' : ` ${tr('eval.runs.english-only')}`);
   renderBalances();
   renderTransactions();
   await loadNetwork();

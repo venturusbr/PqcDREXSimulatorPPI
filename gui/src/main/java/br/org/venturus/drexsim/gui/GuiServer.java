@@ -29,6 +29,7 @@ import picocli.CommandLine.Option;
  * GET  /api/transactions/{hash}     eth_getTransactionByHash and eth_getTransactionReceipt (?node=node-2)
  * GET  /api/nodes                   every node and its status   POST /api/nodes/rescan
  * GET  /api/abi                     selectors, event topics and role ids of the Drex contracts
+ * GET  /api/languages               the interface's languages: the files in /public/i18n
  * POST /api/jobs/{demo|deploy|flows|security|bench}   starts a background job
  * GET  /api/jobs, /api/jobs/{id}    job status, log and report
  * GET  /api/events                  Server-Sent Events: block, tx, job, job-log, accounts, balances-changed
@@ -113,6 +114,8 @@ public final class GuiServer implements Callable<Integer> {
     app.get("/api/nodes", ctx -> ctx.json(service.nodeStatus()));
     app.post("/api/nodes/rescan", ctx -> ctx.json(service.rescanNodes()));
     app.get("/api/abi", ctx -> ctx.json(service.abi()));
+    List<Languages.Language> languages = Languages.list();
+    app.get("/api/languages", ctx -> ctx.json(languages));
     app.get("/api/accounts", ctx -> ctx.json(service.accounts()));
     app.post("/api/accounts", ctx -> {
       NewAccount body = ctx.bodyAsClass(NewAccount.class);
