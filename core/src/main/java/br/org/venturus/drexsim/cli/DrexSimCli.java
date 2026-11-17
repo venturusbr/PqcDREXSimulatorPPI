@@ -1,5 +1,8 @@
 package br.org.venturus.drexsim.cli;
 
+import br.org.venturus.drexsim.bench.BenchReport;
+import br.org.venturus.drexsim.bench.LevelResult;
+import br.org.venturus.drexsim.bench.LoadTest;
 import br.org.venturus.drexsim.chain.Chain;
 import br.org.venturus.drexsim.chain.SentTransaction;
 import br.org.venturus.drexsim.crypto.Dsa;
@@ -10,6 +13,11 @@ import br.org.venturus.drexsim.drex.DrexClient;
 import br.org.venturus.drexsim.drex.DrexDeployment;
 import br.org.venturus.drexsim.keystore.Account;
 import br.org.venturus.drexsim.keystore.AccountStore;
+import br.org.venturus.drexsim.scenario.FlowMatrix;
+import br.org.venturus.drexsim.scenario.SignerProfile;
+import br.org.venturus.drexsim.security.SecurityReport;
+import br.org.venturus.drexsim.security.SecurityResult;
+import br.org.venturus.drexsim.security.SecuritySuite;
 import br.org.venturus.drexsim.tx.TxFormat;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -36,7 +44,10 @@ import picocli.CommandLine.ParentCommand;
       DrexSimCli.AccountsCommand.class,
       DrexSimCli.DeployCommand.class,
       DrexSimCli.SetupDemoCommand.class,
-      DrexSimCli.BalancesCommand.class
+      DrexSimCli.BalancesCommand.class,
+      DrexSimCli.FlowsCommand.class,
+      DrexSimCli.SecurityCommand.class,
+      DrexSimCli.BenchCommand.class
     })
 public final class DrexSimCli {
 
@@ -255,4 +266,114 @@ public final class DrexSimCli {
     }
   }
 
+  // ------------------------------------------------------------------ flows
+
+  @Command(mixinStandardHelpOptions = true, name = "flows",
+      description = "Runs the Drex use-case flows 0-18 once per signer DSA, each with fresh accounts and contracts, "
+          + "and reports a flow x DSA matrix (pass/fail, gas, bytes).")
+  static final class FlowsCommand implements Callable<Integer> {
+    @ParentCommand DrexSimCli root;
+
+    @Option(names = "--dsa", split = ",",
+        description = "Signer profiles, e.g. MLDSA44,SECP256K1-MLDSA44,SECP256K1:std. Default: the classical baseline "
+            + "SECP256K1:std plus every DSA in flexible transactions.")
+    List<String> dsas = new ArrayList<>();
+
+    @Option(names = "--parallel", defaultValue = "9", description = "Profiles run at the same time (default: ${DEFAULT-VALUE}).")
+    int parallel;
+
+    @Option(names = "--out", description = "Report directory (default: reports/flows-<timestamp>).")
+    Path out;
+
+    @Override
+    public Integer call() throws Exception {
+      List<SignerProfile> profiles = dsas.isEmpty() ? SignerProfile.all() : dsas.stream().map(SignerProfile::parse).toList();
+      Path dir = out != null ? out
+          : Path.of("reports", "flows-" + java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")));
+      System.out.println("Running flows 0-18 for " + profiles.stream().map(SignerProfile::label).toList() + " on " + root.rpc);
+      FlowMatrix matrix = FlowMatrix.run(root.rpc, profiles, parallel, root.quiet ? s -> {} : System.out::println);
+      System.out.println();
+      System.out.print(matrix.renderText());
+      matrix.write(dir);
+      System.out.println("Report: " + dir.resolve("flows.md") + " and " + dir.resolve("flows.csv"));
+      return matrix.allPassed() ? 0 : 1;
+    }
+  }
+
+  // ------------------------------------------------------------------ security
+
+  @Command(mixinStandardHelpOptions = true, name = "security",
+      description = "Attacks the live network: forged and tampered transactions for every DSA, a simulated quantum "
+          + "adversary against classical and hybrid deployments, and known contract flaws.")
+  static final class SecurityCommand implements Callable<Integer> {
+    @ParentCommand DrexSimCli root;
+
+    @Option(names = "--out", description = "Report directory (default: reports/security-<timestamp>).")
+    Path out;
+
+    @Override
+    public Integer call() throws Exception {
+      Path dir = out != null ? out
+          : Path.of("reports", "security-" + java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")));
+      List<SecurityResult> results = new SecuritySuite(root.rpc, root.quiet ? s -> {} : System.out::println).run();
+      System.out.println();
+      System.out.print(SecurityReport.summary(results));
+      SecurityReport.write(results, root.rpc, dir);
+      System.out.println("Report: " + dir.resolve("security.md") + " and " + dir.resolve("security.csv"));
+      return SecurityReport.allAsExpected(results) ? 0 : 1;
+    }
+  }
+
+  // ------------------------------------------------------------------ bench
+
+  @Command(mixinStandardHelpOptions = true, name = "bench",
+      description = "Load test: Drex clients paying each other (same-bank transfers and inter-bank swaps) at increasing "
+          + "rates, per signer DSA. Appends to bench.csv and rewrites bench.md in the output directory.")
+  static final class BenchCommand implements Callable<Integer> {
+    @ParentCommand DrexSimCli root;
+
+    @Option(names = "--dsa", split = ",", description = "Signer profiles (default: SECP256K1:std,SECP256K1-MLDSA44).")
+    List<String> dsas = new ArrayList<>(List.of("SECP256K1:std", "SECP256K1-MLDSA44"));
+
+    @Option(names = "--rates", split = ",", defaultValue = "10,25,50,100",
+        description = "Target submission rates in transactions per second (default: ${DEFAULT-VALUE}).")
+    List<Double> rates;
+
+    @Option(names = "--duration", defaultValue = "30", description = "Seconds per rate (default: ${DEFAULT-VALUE}).")
+    int seconds;
+
+    @Option(names = "--clients", defaultValue = "50", description = "Clients per bank (default: ${DEFAULT-VALUE}).")
+    int clients;
+
+    @Option(names = "--swap-share", defaultValue = "0.3",
+        description = "Fraction of inter-bank swaps; the rest are same-bank transfers (default: ${DEFAULT-VALUE}).")
+    double swapShare;
+
+    @Option(names = "--nodes", split = ",",
+        description = "JSON-RPC endpoints to spread transactions over (default: --rpc only).")
+    List<String> nodes = new ArrayList<>();
+
+    @Option(names = "--drain", defaultValue = "30", description = "Seconds to wait for a level's backlog (default: ${DEFAULT-VALUE}).")
+    int drain;
+
+    @Option(names = "--threads", defaultValue = "16", description = "Signing and submitting threads (default: ${DEFAULT-VALUE}).")
+    int threads;
+
+    @Option(names = "--out", defaultValue = "reports/bench", description = "Report directory (default: ${DEFAULT-VALUE}).")
+    Path out;
+
+    @Override
+    public Integer call() throws Exception {
+      List<String> endpoints = nodes.isEmpty() ? List.of(root.rpc) : nodes;
+      for (String dsa : dsas) {
+        SignerProfile profile = SignerProfile.parse(dsa);
+        LoadTest test = new LoadTest(new LoadTest.Config(endpoints, profile, clients, rates, seconds, swapShare, drain, threads),
+            root.quiet ? s -> {} : System.out::println);
+        List<LevelResult> levels = test.run();
+        BenchReport.append(out, levels);
+      }
+      System.out.println("Report: " + out.resolve("bench.md") + " and " + out.resolve("bench.csv"));
+      return 0;
+    }
+  }
 }

@@ -3,3 +3,4 @@ simulator-data/
 *.iml
 .idea/
 .vscode/
+reports/

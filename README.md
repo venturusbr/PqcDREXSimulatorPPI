@@ -8,7 +8,7 @@ A front-end and smart contracts that reproduce Brazil's Real Digital (Drex) pilo
 |---|---|
 | [contracts/](contracts) | Hardhat project: the Drex contracts (pinned copy, OpenZeppelin 4.9.6), functional tests on the standard EVM, and the ABI/bytecode exported to `contracts/build/` for the Java core |
 | [core/](core) | Java 21 library and `drexsim` CLI: signs transactions with every DSA of besu-pqc-ppi, deploys and drives the Drex contracts, shows RD/RT balances |
-| [infra/](infra) | Starts a besu-pqc-ppi QBFT network through besu-qbft, with every account DSA enabled |
+| [infra/](infra) | Starts a besu-pqc-ppi QBFT network through besu-qbft, with every account DSA enabled, and runs load tests across validator counts |
 | [docs/](docs) | Contracts reference and use-case flows |
 
 ## Requirements
@@ -41,7 +41,7 @@ java -jar core/target/drexsim.jar balances --watch 2
 
 `setup-demo` creates BCB, two banks with their reserves and Real Tokenizado (BRLA, BRLB) and three clients, each actor signing with a different DSA (`MLDSA44`, `MLDSA87`, `FALCON512`, both hybrids, and standard ECDSA for one bank as the classical baseline). It then mints Real Digital through STR, deposits client funds, freezes part of a balance, and runs payments in which every client signs: two inter-bank swaps and one transfer inside Banco A. Every transaction is printed with its type, signature and key sizes and gas limit.
 
-Other commands: `accounts list`, `accounts new <name> --dsa <DSA> [--standard]`, `deploy`. Run `java -jar core/target/drexsim.jar <command> --help` for details. Accounts and contract addresses are kept in `simulator-data/` (`--data-dir`); the keys there are **test keys in plain text**.
+Other commands: `accounts list`, `accounts new <name> --dsa <DSA> [--standard]`, `deploy`, and the evaluation commands `flows`, `security` and `bench` (below). Run `java -jar core/target/drexsim.jar <command> --help` for details. Accounts and contract addresses are kept in `simulator-data/` (`--data-dir`); the keys there are **test keys in plain text**.
 
 ### Balance viewer
 
@@ -66,11 +66,35 @@ Total supply on chain |                     |                | 2.050.000,00 |   
 
 Options: `--account <name>` (repeatable), `--address <0x..>` for wallets created elsewhere, `--hide-empty`, `--watch <seconds>`, and `--json` for the raw snapshot (amounts in cents, with `balance`, `frozen` and `available`). The same data comes from `BalanceService` for other front-ends.
 
+## Evaluating the platform
+
+Three commands run the evaluation of the proof of concept against a live network. Each writes a Markdown report and a CSV under `reports/`.
+
+| Command | What it does |
+|---|---|
+| `drexsim flows` | Runs the 19 Drex use-case flows (docs/use-case-flows.md) once per signer DSA: the classical baseline (standard ECDSA transactions) and every DSA of the fork in flexible transactions. Each run uses fresh accounts and contracts, checks the on-chain state of every flow, including the calls that must be refused, and reports a flow × DSA matrix of pass/fail, gas and bytes. |
+| `drexsim security` | Attacks the network. **Protocol**: tampered, relabelled, replayed or forged transactions for every DSA. **Quantum adversary**: knowing every ECDSA private key (as Shor's algorithm would), it drains a reserve, mints as BCB and moves client funds on a classical deployment, and must fail with every strategy on a hybrid one (ECDSA-only and standard-transaction downgrades, its own PQC key, a forged PQC half). **Contract**: reproduces flaws of the pilot contracts. |
+| `drexsim bench` | Load test: clients of two banks paying each other (same-bank transfers and inter-bank swaps) at increasing rates. Reports included TPS, latency percentiles, transactions per block, block fill, the throughput ceiling set by the block gas limit, and node CPU and memory. |
+
+```sh
+java -jar core/target/drexsim.jar flows
+java -jar core/target/drexsim.jar security
+java -jar core/target/drexsim.jar bench --dsa SECP256K1:std,SECP256K1-MLDSA44 --rates 50,100,200 --nodes http://localhost:8545,http://localhost:8546,http://localhost:8547,http://localhost:8548
+```
+
+To compare networks of different sizes, `infra/scalability.sh` restarts the network with each validator count and runs `bench` on it:
+
+```sh
+infra/scalability.sh hyperledger/besu:26.1.0-pqc --validators=4,7,10 --dsa=SECP256K1:std,SECP256K1-MLDSA44
+```
+
+Results of a run of all three are in [docs/results/](docs/results).
+
 ### Tests
 
 ```sh
 mvn test                                         # unit tests, no network needed
-mvn test -Ddrexsim.rpc=http://localhost:8545     # also runs the demo end to end on a live network
+mvn test -Ddrexsim.rpc=http://localhost:8545     # also runs the demo, flows and security suites on a live network
 cd contracts && npm install && npm test          # contract tests on the Hardhat network
 ```
 
@@ -105,6 +129,7 @@ The contracts come from [wireshape/real-digital-smart-contracts](https://github.
 
 - [Contracts reference](docs/contracts-reference.md): what each contract does, its functions, roles, required setup and known caveats.
 - [Use case flows](docs/use-case-flows.md): which contracts and functions to call, in which order and by which wallet, for each use case (network setup, onboarding, minting, transfers, swaps, freezing, pausing), with argument types.
+- [Proof of concept results](docs/results/README.md): what running the flows, the security tests and the load tests on besu-pqc-ppi showed, with the reports of each run.
 
 ## License
 

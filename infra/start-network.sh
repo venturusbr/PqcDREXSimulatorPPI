@@ -3,9 +3,10 @@
 #
 # besu-qbft is copied to infra/.work/besu-qbft and patched there, so the original checkout is never
 # modified. The patch enables every account DSA the simulator can sign with (pure post-quantum
-# ones included, which besu-qbft leaves out by default) and sets the number of validators.
+# ones included, which besu-qbft leaves out by default) and sets the number of validators and,
+# optionally, the block gas limit and block period.
 #
-# Usage: infra/start-network.sh <besu-image> [--node-dsa=<DSA>] [--nodes=<N>]
+# Usage: infra/start-network.sh <besu-image> [--node-dsa=<DSA>] [--nodes=<N>] [--gas-limit=<gas>] [--block-period=<s>]
 #   BESU_QBFT_DIR  path of the besu-qbft checkout (default: ../besu-qbft next to this repository)
 set -euo pipefail
 
@@ -20,16 +21,22 @@ usage() {
     echo "Usage: $0 <besu-image> [--node-dsa=<DSA>] [--nodes=<N>]"
     echo "  --node-dsa  validator key DSA, passed to besu-qbft (default SECP256K1-MLDSA44)"
     echo "  --nodes     number of validators (default 4)"
+    echo "  --gas-limit block gas limit (default: besu-qbft's 50000000)"
+    echo "  --block-period seconds between blocks (default: besu-qbft's 2)"
     echo "Example: $0 hyperledger/besu:26.1.0-pqc --node-dsa=SECP256K1-MLDSA44 --nodes=4"
 }
 
 IMAGE=""
 NODE_DSA="SECP256K1-MLDSA44"
 NODES=4
+GAS_LIMIT=""
+BLOCK_PERIOD=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --node-dsa=*) NODE_DSA="${1#*=}" ;;
         --nodes=*) NODES="${1#*=}" ;;
+        --gas-limit=*) GAS_LIMIT="${1#*=}" ;;
+        --block-period=*) BLOCK_PERIOD="${1#*=}" ;;
         -h|--help) usage; exit 0 ;;
         -*) echo "Unknown option: $1"; usage; exit 1 ;;
         *) IMAGE="$1" ;;
@@ -59,6 +66,17 @@ grep -q '^accounts-supported-dsas=\["SECP256K1", "SECP256R1", "MLDSA44"' "$WORK_
 
 echo "Setting $NODES validators"
 sed -i -E "s#(\"count\": *)[0-9]+#\1$NODES#" "$WORK_DIR/genesis-generator/qbftConfig.json"
+
+if [ -n "$GAS_LIMIT" ]; then
+    [[ "$GAS_LIMIT" =~ ^[1-9][0-9]*$ ]] || { echo "--gas-limit must be a positive integer"; exit 1; }
+    echo "Setting block gas limit $GAS_LIMIT"
+    sed -i -E "s#(\"gasLimit\": *)\"[^\"]*\"#\1\"$(printf '0x%X' "$GAS_LIMIT")\"#" "$WORK_DIR/genesis-generator/qbftConfig.json"
+fi
+if [ -n "$BLOCK_PERIOD" ]; then
+    [[ "$BLOCK_PERIOD" =~ ^[1-9][0-9]*$ ]] || { echo "--block-period must be a positive integer"; exit 1; }
+    echo "Setting block period $BLOCK_PERIOD s"
+    sed -i -E "s#(\"blockperiodseconds\": *)[0-9]+#\1$BLOCK_PERIOD#" "$WORK_DIR/genesis-generator/qbftConfig.json"
+fi
 
 cd "$WORK_DIR"
 exec ./init-qbft.sh "$IMAGE" --node-dsa="$NODE_DSA"
