@@ -45,7 +45,7 @@ class OperationsTest {
     assertNotNull(getClass().getResource("/public/index.html"));
     assertNotNull(getClass().getResource("/public/app.js"));
     assertNotNull(getClass().getResource("/public/app.css"));
-    assertNotNull(getClass().getResource("/public/drex-logo.svg"));
+    assertNotNull(getClass().getResource("/public/logo.svg"));
     assertNotNull(getClass().getResource("/public/favicon.ico"));
     assertEquals(16, SimulatorService.OPERATIONS.size());
   }
