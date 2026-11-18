@@ -488,6 +488,7 @@ function updateStandardToggle() {
   const box = $('#account-standard');
   const allowed = dsa === 'SECP256K1' || dsa === 'SECP256R1';
   box.disabled = !allowed;
+  box.closest('label').classList.toggle('hidden', !allowed);
   if (!allowed) box.checked = false;
 }
 $('#account-dsa').addEventListener('change', updateStandardToggle);
