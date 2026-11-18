@@ -127,14 +127,18 @@ main { padding: 20px 24px 48px; max-width: 1500px; margin: 0 auto; }
 .card-tools { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .grid { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 20px; align-items: start; }
 .grid > .card { margin-bottom: 0; }
+/* Network tab: the Contracts card takes the width its full addresses need, the Chain card the rest. */
+.grid.grid-network { grid-template-columns: minmax(0, 1fr) minmax(0, max-content); }
 .grid { margin-bottom: 20px; }
 .eval-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; margin-bottom: 20px; }
 .eval-grid > .card { margin-bottom: 0; display: flex; flex-direction: column; }
-.eval-grid > .card > button { margin-top: auto; align-self: flex-start; }
+.eval-grid > .card > button { margin-top: auto; align-self: center; }
+/* The forms' submit buttons, centered under their fields. */
+#op-form > button[type=submit], #account-form > button[type=submit] { display: block; margin-inline: auto; }
 .eval-grid p { color: var(--muted); }
 
 @media (max-width: 1100px) {
-  .grid, .eval-grid { grid-template-columns: minmax(0, 1fr); }
+  .grid, .grid.grid-network, .eval-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 600px) {
   main { padding: 16px; }
@@ -197,6 +201,11 @@ table.data td.num, table.data th.num { text-align: right; white-space: nowrap; }
 table.data tfoot td { font-weight: 600; background: var(--surface-2); border-bottom: 0; }
 table.data tfoot tr.supply td { color: var(--muted); font-weight: 500; }
 table.data tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+table.data tbody tr.clickable { cursor: pointer; }
+table.data tbody tr.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.op-cell { white-space: nowrap; }
+.ops-compact .op-name { display: none; }
+.ops-compact .op-cell { cursor: help; text-decoration: underline dotted; text-underline-offset: 3px; }
 .empty-row td { color: var(--muted); text-align: center; padding: 22px; }
 #txs td, .balances td, #accounts td, #nodes td { white-space: nowrap; }
 
@@ -329,7 +338,20 @@ pre.raw {
 .balances td.rt .frozen { margin-right: 54px; }
 .subhead { font-size: 13.5px; font-weight: 650; margin: 6px 0; display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .table-wrap + .subhead { margin-top: 22px; }
-.balances-note { margin: 10px 0 0; }
+.balances-note {
+  display: flex; gap: 10px; align-items: flex-start; margin: 14px 0 0; padding: 10px 12px; font-size: 13px;
+  border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 8px; background: var(--surface-2);
+}
+.balances-note > .role { flex: none; margin-top: 1px; }
+.unlisted-names { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.unlisted-name {
+  padding: 1px 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-size: 12.5px; font-weight: 550;
+}
+.not-enabled {
+  display: inline-block; margin-right: 8px; padding: 0 6px; border-radius: 999px; cursor: help;
+  font-size: 11px; font-weight: 600; line-height: 17px; vertical-align: 1px;
+  color: var(--warn); background: var(--warn-soft);
+}
 .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
 .segmented button { border: 0; border-radius: 0; background: var(--surface); color: var(--muted); padding: 4px 11px; font-size: 12.5px; font-weight: 550; }
 .segmented button + button { border-left: 1px solid var(--border); }

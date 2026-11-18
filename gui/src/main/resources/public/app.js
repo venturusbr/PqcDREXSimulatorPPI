@@ -277,9 +277,19 @@ function roleIcons(w) {
 $('#role-legend').innerHTML = LEGEND_ROLES
   .map((role) => `<span>${roleIcon(role, tr(`role.${role}.hint`))}${tr(`role.${role}.name`)}</span>`).join('');
 
-function amountHtml(h, tag = '') {
+function amountHtml(h, tag = '', flag = '') {
   const frozen = h.frozen ? `<span class="frozen" title="${tr('balances.frozen-hint')}">${tr('balances.frozen', { amount: money(h.frozen) })}</span>` : '';
-  return `<span class="${h.balance ? '' : 'zero'}">${money(h.balance)}</span>${tag}${frozen}`;
+  return `${flag}<span class="${h.balance ? '' : 'zero'}">${money(h.balance)}</span>${tag}${frozen}`;
+}
+
+/**
+ * A warning before an amount the wallet holds in a token it is not enabled in. transfer() checks only the
+ * sender, so anyone enabled can send to it, and disableAccount() leaves the balance where it was.
+ */
+function notEnabledFlag(w, symbol) {
+  const enabledIn = w.roles?.enabledIn;
+  if (!enabledIn || enabledIn.includes(symbol) || !holdsToken(w, symbol)) return '';
+  return `<span class="not-enabled" title="${esc(tr('balances.not-enabled-hint', { wallet: w.wallet.label, token: symbol }))}">${tr('balances.not-enabled')}</span>`;
 }
 
 const NO_HOLDING = { balance: 0, frozen: 0 };
@@ -336,7 +346,7 @@ const holdsToken = (w, symbol) => { const h = w.holdings[symbol]; return h && (h
 function rtCellHtml(w, rts) {
   const held = rts.filter((t) => holdsToken(w, t.symbol));
   return held.length
-    ? held.map((t) => `<div class="rt-line">${amountHtml(w.holdings[t.symbol], tokenTag(t))}</div>`).join('')
+    ? held.map((t) => `<div class="rt-line">${amountHtml(w.holdings[t.symbol], tokenTag(t), notEnabledFlag(w, t.symbol))}</div>`).join('')
     : amountHtml(NO_HOLDING, ' <span class="token-tag none">–</span>');
 }
 
@@ -369,7 +379,7 @@ function renderUnifiedBalances(snap, prev) {
       rdSum += Number(h.balance);
       rts.filter((t) => holdsToken(w, t.symbol)).forEach((t) => { rtSums[t.symbol] += Number(w.holdings[t.symbol].balance); });
       return `<tr>${walletCellsHtml(w)}
-        <td class="num ${changed(w, 'BRL') ? 'flash' : ''}">${amountHtml(h)}</td>
+        <td class="num ${changed(w, 'BRL') ? 'flash' : ''}">${amountHtml(h, '', notEnabledFlag(w, 'BRL'))}</td>
         <td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
     }).join('');
   table.innerHTML = `<thead><tr><th>${tr('balances.wallet')}</th><th>${tr('common.signs-with')}</th><th>${tr('common.address')}</th>
@@ -411,7 +421,7 @@ function renderSplitBalances(snap, prev) {
     .map((w) => {
       const h = w.holdings.BRL || NO_HOLDING;
       rdSum += Number(h.balance);
-      return `<tr>${walletCells(w)}<td class="num ${changed(w, 'BRL') ? 'flash' : ''}">${amountHtml(h)}</td></tr>`;
+      return `<tr>${walletCells(w)}<td class="num ${changed(w, 'BRL') ? 'flash' : ''}">${amountHtml(h, '', notEnabledFlag(w, 'BRL'))}</td></tr>`;
     }).join('');
   participants.innerHTML = `<thead><tr><th>${tr('balances.participant')}</th><th>${tr('common.signs-with')}</th>
       <th>${tr('common.address')}</th><th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th></tr></thead>
@@ -436,8 +446,10 @@ function renderSplitBalances(snap, prev) {
 
   // Accounts in neither table: never enabled anywhere and holding nothing.
   const unlisted = hideEmpty ? [] : snap.wallets.filter((w) => !isParticipant(w) && !isClient(w));
-  note.textContent = unlisted.length
-    ? tr('balances.unlisted', { names: unlisted.map((w) => w.wallet.label).join(', ') }) : '';
+  note.innerHTML = unlisted.length ? `${roleIcon('none', tr('role.none.hint'))}
+    <div><b>${trn('balances.unlisted.title', unlisted.length)}</b>
+      <span class="muted">${tr('balances.unlisted.text')}</span>
+      <div class="unlisted-names">${unlisted.map((w) => `<span class="unlisted-name">${esc(w.wallet.label)}</span>`).join('')}</div></div>` : '';
 
   $('#balances-meta').textContent = tr('common.block-number', { n: snap.blockNumber });
 }
@@ -656,14 +668,61 @@ function operationName(label) {
   return JOB_STEPS[label] ? tr(JOB_STEPS[label]) : label;
 }
 
+/** An operation as "17. Pause token"; setup steps, which have no flow number, by name only. */
+function operationTitle(label) {
+  const op = state.operations.find((o) => o.label === label);
+  return op?.flow ? `${op.flow}. ${opLabel(op)}` : operationName(label);
+}
+
+/**
+ * The operation as "17. Pause token". When the table is too wide for its card, fitOperations() hides the
+ * names, leaving the number with the full title as a tooltip. Setup steps have no number: they keep their name.
+ */
+function operationCell(label) {
+  if (!label) return '–';
+  const op = state.operations.find((o) => o.label === label);
+  if (!op?.flow) return esc(operationName(label));
+  return `<span class="op-cell" data-title="${esc(operationTitle(label))}"><span class="op-number">${op.flow}</span><span class="op-name">. ${esc(opLabel(op))}</span></span>`;
+}
+
+/** Shows the operations' names only if the table then fits its card without scrolling sideways. */
+function fitOperations() {
+  const table = $('#txs');
+  const wrap = table.parentElement;
+  if (!wrap.clientWidth) return; // tab hidden: the observer runs this again when it shows
+  table.classList.remove('ops-compact');
+  const compact = table.scrollWidth > wrap.clientWidth + 1;
+  table.classList.toggle('ops-compact', compact);
+  table.querySelectorAll('.op-cell').forEach((c) => {
+    if (compact) c.title = c.dataset.title; else c.removeAttribute('title');
+  });
+}
+// Re-check after the layout settles: when the window resizes, and when the card resizes or its tab shows.
+let fitTimer = 0;
+const scheduleFit = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitOperations, 50); };
+new ResizeObserver(scheduleFit).observe($('#txs').parentElement);
+addEventListener('resize', scheduleFit);
+
+/** The contract a transaction called, by name when the simulator knows it. */
+function contractCell(to, book) {
+  if (!to) return `<span class="small">${tr('details.to-creation')}</span>`;
+  const known = book.get(to.toLowerCase());
+  return known ? `<span title="${esc(to)}">${esc(known.name)}</span>` : `<span class="small" title="${esc(to)}">${esc(shortAddr(to))}</span>`;
+}
+
 function renderTransactions() {
+  const book = addressBook();
   const rows = [...state.txs.values()].sort((a, b) => b.id - a.id).slice(0, 200).map((tx) => {
     const gas = tx.gasUsed != null ? `${num(tx.gasUsed)} <span class="small">/ ${num(tx.gasLimit)}</span>`
       : `<span class="small">${tr('txs.gas-limit', { n: num(tx.gasLimit) })}</span>`;
     const keyBytes = tx.publicKeyBytes ? `${num(tx.publicKeyBytes)} B` : tr('txs.key-recovered');
-    return `<tr>
+    const opens = tx.hash && tx.status !== 'rejected';
+    const rowAttrs = opens
+      ? ` class="clickable" tabindex="0" title="${tr('txs.open-details')}" data-details="${esc(tx.hash)}" data-node="${esc(tx.node || '')}"` : '';
+    return `<tr${rowAttrs}>
       <td class="small">${time(tx.time)}</td>
-      <td>${esc(tx.operation ? operationName(tx.operation) : '–')}</td>
+      <td>${operationCell(tx.operation)}</td>
+      <td>${contractCell(tx.to, book)}</td>
       <td>${esc(tx.account)}</td>
       <td>${badge(tx.dsa)} <span class="small">${esc(tx.type)}</span></td>
       <td class="num">${num(tx.size / 1024, 1)} KB</td>
@@ -671,14 +730,13 @@ function renderTransactions() {
       <td class="num">${gas}</td>
       <td><span class="status ${esc(tx.status)}" title="${esc(tx.error || '')}">${esc(statusLabel(tx.status))}</span>${tx.block != null ? ` <span class="small">#${tx.block}</span>` : ''}</td>
       <td><span class="hash" data-copy="${esc(tx.hash)}" title="${esc(tx.hash)}">${esc(shortAddr(tx.hash))}</span></td>
-      <td>${esc(tx.node || '–')}</td>
-      <td>${tx.hash && tx.status !== 'rejected' ? `<button class="small-btn" data-details="${esc(tx.hash)}" data-node="${esc(tx.node || '')}">${tr('txs.details')}</button>` : ''}</td>
     </tr>`;
   }).join('');
-  $('#txs').innerHTML = `<thead><tr><th>${tr('common.time')}</th><th>${tr('common.operation')}</th><th>${tr('txs.account')}</th><th>${tr('common.signs-with')}</th>
+  $('#txs').innerHTML = `<thead><tr><th>${tr('common.time')}</th><th>${tr('common.operation')}</th><th>${tr('txs.contract')}</th><th>${tr('txs.account')}</th><th>${tr('common.signs-with')}</th>
     <th class="num">${tr('txs.size')}</th><th class="num">${tr('txs.signature-key')}</th><th class="num">${tr('txs.gas')}</th><th>${tr('common.status')}</th>
-    <th>${tr('txs.hash')}</th><th>${tr('common.node')}</th><th aria-label="${tr('txs.details')}"></th></tr></thead>
-    <tbody>${rows || `<tr class="empty-row"><td colspan="11">${tr('txs.empty')}</td></tr>`}</tbody>`;
+    <th>${tr('txs.hash')}</th></tr></thead>
+    <tbody>${rows || `<tr class="empty-row"><td colspan="10">${tr('txs.empty')}</td></tr>`}</tbody>`;
+  fitOperations();
 }
 
 // ------------------------------------------------------------------ transaction details
@@ -908,7 +966,7 @@ function renderDetails(d) {
     ['details.value', `${fmtInt(qty(tx.value))} wei`],
     ['details.nonce', String(Number(tx.nonce))],
     ['common.chain-id', String(Number(tx.chainId))],
-    d.sent && ['details.sent', `${esc(d.sent.operation ? operationName(d.sent.operation) : '–')}${d.sent.node ? ` <span class="small">${tr('details.via', { node: esc(d.sent.node) })}</span>` : ''}`],
+    d.sent && ['common.operation', `${esc(d.sent.operation ? operationTitle(d.sent.operation) : '–')}${d.sent.node ? ` <span class="small">${tr('details.via', { node: esc(d.sent.node) })}</span>` : ''}`],
     ['details.data-from', `${esc(d.node)} <span class="small">${esc(d.nodeUrl)}</span>`],
     hasReceipt && ['details.block-hash', `<span class="addr" data-copy="${esc(rc.blockHash)}">${esc(rc.blockHash)}</span>`],
   ]);
@@ -945,9 +1003,16 @@ async function showDetails(hash, node) {
   }
 }
 
+// A details link, or a click anywhere on a transaction row except on something with its own action (copy).
 document.addEventListener('click', (e) => {
   const b = e.target.closest('[data-details]');
-  if (b) showDetails(b.dataset.details, b.dataset.node);
+  if (!b || (b.tagName === 'TR' && e.target.closest('[data-copy], a, button'))) return;
+  if (b.tagName === 'TR' && getSelection()?.toString()) return; // selecting text, not opening
+  showDetails(b.dataset.details, b.dataset.node);
+});
+document.addEventListener('keydown', (e) => {
+  const row = e.target.closest?.('tr[data-details]');
+  if (row && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); showDetails(row.dataset.details, row.dataset.node); }
 });
 $('#tx-dialog-close').addEventListener('click', () => $('#tx-dialog').close());
 // A click on the backdrop (outside the panel) closes the dialog.

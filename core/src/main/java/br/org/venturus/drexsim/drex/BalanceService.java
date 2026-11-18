@@ -61,8 +61,13 @@ public final class BalanceService {
    * {@code client} is enabled in the Real Tokenizado listed in {@code clientOf}. A wallet can have
    * several roles, or none if it was never enabled anywhere.
    */
-  public record Roles(List<String> roles, List<String> clientOf) {
-    public static final Roles NONE = new Roles(List.of(), List.of());
+  /**
+   * What the contracts say a wallet is. {@code enabledIn} lists the tokens whose {@code verifyAccount} is true
+   * for it: a balance in any other token got there without the wallet being enabled (see the README's known
+   * contract flaws) or stayed after it was disabled.
+   */
+  public record Roles(List<String> roles, List<String> clientOf, List<String> enabledIn) {
+    public static final Roles NONE = new Roles(List.of(), List.of(), List.of());
   }
 
   public record WalletBalances(Wallet wallet, Map<String, Holding> holdings, Roles roles) {
@@ -155,11 +160,13 @@ public final class BalanceService {
   private static Roles roles(Wallet wallet, boolean admin, Map<String, Boolean> enabled, List<String> reserves) {
     List<String> roles = new ArrayList<>();
     List<String> clientOf = new ArrayList<>();
+    List<String> enabledIn = new ArrayList<>();
     boolean reserve = reserves.contains(wallet.address().toLowerCase());
     if (admin) roles.add("bcb");
     if (reserve) roles.add("reserve");
     enabled.forEach((symbol, isEnabled) -> {
       if (!isEnabled) return;
+      enabledIn.add(symbol);
       if (symbol.equals(RD)) {
         if (!reserve) roles.add("participant");
       } else {
@@ -167,7 +174,7 @@ public final class BalanceService {
       }
     });
     if (!clientOf.isEmpty()) roles.add("client");
-    return new Roles(List.copyOf(roles), List.copyOf(clientOf));
+    return new Roles(List.copyOf(roles), List.copyOf(clientOf), List.copyOf(enabledIn));
   }
 
   // ------------------------------------------------------------------ batched calls
