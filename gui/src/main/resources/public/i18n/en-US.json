@@ -288,6 +288,8 @@
   "tab.evaluation": "Evaluation",
   "tab.network": "Network",
   "tab.overview": "Overview",
+  "theme.to-dark": "Switch to dark mode",
+  "theme.to-light": "Switch to light mode",
   "txs.account": "Account",
   "txs.contract": "Contract",
   "txs.empty": "No transactions yet. Run an operation.",

@@ -101,6 +101,31 @@ try {
   if (saved) document.querySelector(`.tab[data-tab="${saved}"]`)?.click();
 } catch (_) { /* storage unavailable */ }
 
+// ------------------------------------------------------------------ light / dark theme
+//
+// The page follows the system's appearance until the user clicks the header toggle; the choice is then
+// saved (drexsim.theme) and set as data-theme on <html>, which index.html applies again before the first
+// paint on the next visit.
+
+const systemDark = matchMedia('(prefers-color-scheme: dark)');
+const currentTheme = () => document.documentElement.dataset.theme || (systemDark.matches ? 'dark' : 'light');
+
+function updateThemeToggle() {
+  const label = tr(currentTheme() === 'dark' ? 'theme.to-light' : 'theme.to-dark');
+  const button = $('#theme-toggle');
+  button.title = label;
+  button.setAttribute('aria-label', label);
+}
+
+$('#theme-toggle').addEventListener('click', () => {
+  const next = currentTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem('drexsim.theme', next); } catch (_) { /* storage unavailable */ }
+  updateThemeToggle();
+});
+systemDark.addEventListener('change', updateThemeToggle);
+updateThemeToggle();
+
 // ------------------------------------------------------------------ network
 
 async function loadNetwork() {
