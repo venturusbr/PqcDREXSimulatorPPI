@@ -1,0 +1,19 @@
+{
+  "name": "pqc-drex-contracts",
+  "private": true,
+  "license": "(Apache-2.0 AND MIT)",
+  "description": "Real Digital (Drex) pilot contracts compiled and tested for the PQC DREX simulator",
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "export": "hardhat compile && node scripts/export-artifacts.js",
+    "build": "npm run export && npm test"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "5.0.0",
+    "hardhat": "2.29.1"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "4.9.6"
+  }
+}

@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PQC Drex Simulator</title>
+  <link rel="icon" href="favicon.ico" sizes="any">
+  <link rel="icon" href="logo.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img class="logo" src="logo.svg" alt="" width="38" height="38">
+      <div>
+        <h1 data-i18n="app.title"></h1>
+        <p class="subtitle" data-i18n="app.subtitle"></p>
+      </div>
+    </div>
+    <div class="header-tools">
+      <div class="netstatus" id="netstatus">
+        <span class="dot" id="netdot"></span>
+        <span id="nettext" data-i18n="app.connecting"></span>
+      </div>
+      <label class="lang" title="Language" data-i18n-title="app.language">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        <select id="lang" aria-label="Language" data-i18n-aria-label="app.language"></select>
+      </label>
+    </div>
+  </header>
+
+  <nav class="tabs" role="tablist">
+    <button role="tab" class="tab active" data-tab="overview" data-i18n="tab.overview"></button>
+    <button role="tab" class="tab" data-tab="accounts" data-i18n="tab.accounts"></button>
+    <button role="tab" class="tab" data-tab="evaluation" data-i18n="tab.evaluation"></button>
+    <button role="tab" class="tab" data-tab="network" data-i18n="tab.network"></button>
+  </nav>
+
+  <main>
+    <!-- Overview -->
+    <section class="panel active" id="tab-overview">
+      <div class="card empty-state hidden" id="no-deployment">
+        <h2 data-i18n="setup.title"></h2>
+        <p data-i18n="setup.description"></p>
+        <div class="actions">
+          <button class="primary" id="btn-demo" data-i18n="setup.demo-button"></button>
+          <button id="btn-deploy" data-i18n="setup.deploy-button"></button>
+        </div>
+        <div class="joblive hidden" id="setup-job"></div>
+      </div>
+
+      <div class="grid">
+        <div class="card balances-card">
+          <div class="card-head">
+            <h2 data-i18n="balances.title"></h2>
+            <div class="card-tools">
+              <div class="segmented" id="balances-view" role="radiogroup" aria-label="View" data-i18n-aria-label="balances.view">
+                <button type="button" role="radio" data-view="split" title="By role" data-i18n-title="balances.view.split-hint"
+                  data-i18n="balances.view.split"></button>
+                <button type="button" role="radio" data-view="unified" title="Unified" data-i18n-title="balances.view.unified-hint"
+                  data-i18n="balances.view.unified"></button>
+              </div>
+              <label class="toggle"><input type="checkbox" id="hide-empty"> <span data-i18n="balances.hide-empty"></span></label>
+              <span class="muted" id="balances-meta"></span>
+            </div>
+          </div>
+          <div id="balances-split">
+            <h3 class="subhead"><span data-i18n="balances.participants.title"></span> <span class="small" data-i18n="balances.participants.hint"></span></h3>
+            <div class="table-wrap"><table class="data balances" id="balances-participants"></table></div>
+            <h3 class="subhead"><span data-i18n="balances.clients.title"></span> <span class="small" data-i18n="balances.clients.hint"></span></h3>
+            <div class="table-wrap"><table class="data balances" id="balances-clients"></table></div>
+            <div class="balances-note" id="balances-note" role="note"></div>
+          </div>
+          <div class="table-wrap hidden" id="balances-unified-wrap"><table class="data balances" id="balances-unified"></table></div>
+          <p class="legend">
+            <span class="badge pq" data-i18n="family.pq"></span>
+            <span class="badge hybrid" data-i18n="family.hybrid"></span>
+            <span class="badge classical" data-i18n="family.classical"></span>
+            <span class="legend-roles" id="role-legend"></span>
+            <span data-i18n="balances.legend"></span>
+          </p>
+        </div>
+
+        <div class="card op-card">
+          <div class="card-head"><h2 data-i18n="op.title"></h2></div>
+          <label class="field">
+            <span data-i18n="common.operation"></span>
+            <select id="op-select"></select>
+          </label>
+          <p class="op-desc" id="op-desc"></p>
+          <form id="op-form" autocomplete="off"></form>
+          <div class="op-result hidden" id="op-result"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2 data-i18n="txs.title"></h2>
+          <span class="muted" data-i18n="txs.subtitle"></span>
+        </div>
+        <div class="table-wrap"><table class="data" id="txs"></table></div>
+      </div>
+    </section>
+
+    <!-- Accounts -->
+    <section class="panel" id="tab-accounts">
+      <div class="grid">
+        <div class="card">
+          <div class="card-head"><h2 data-i18n="accounts.title"></h2><span class="muted" data-i18n="accounts.subtitle"></span></div>
+          <div class="table-wrap"><table class="data" id="accounts"></table></div>
+        </div>
+        <div class="card op-card">
+          <div class="card-head"><h2 data-i18n="accounts.new.title"></h2></div>
+          <form id="account-form" autocomplete="off">
+            <label class="field"><span data-i18n="common.name"></span><input name="name" required placeholder="account-name" data-i18n-placeholder="accounts.new.name-placeholder" pattern="[A-Za-z0-9._@\-]{1,32}"></label>
+            <label class="field"><span data-i18n="accounts.new.algorithm"></span><select name="dsa" id="account-dsa"></select></label>
+            <label class="toggle"><input type="checkbox" name="standard" id="account-standard">
+              <span data-i18n="accounts.new.standard"></span></label>
+            <button class="primary" type="submit" data-i18n="accounts.new.submit"></button>
+          </form>
+          <div class="op-result hidden" id="account-result"></div>
+          <dl class="dsa-notes" id="dsa-notes"></dl>
+        </div>
+      </div>
+    </section>
+
+    <!-- Evaluation -->
+    <section class="panel" id="tab-evaluation">
+      <div class="eval-grid">
+        <div class="card">
+          <h2 data-i18n="eval.flows.title"></h2>
+          <p data-i18n="eval.flows.description"></p>
+          <div class="chips" id="flows-dsas"></div>
+          <button class="primary" data-job="flows" data-i18n="eval.flows.run"></button>
+        </div>
+        <div class="card">
+          <h2 data-i18n="eval.security.title"></h2>
+          <p data-i18n="eval.security.description"></p>
+          <button class="primary" data-job="security" data-i18n="eval.security.run"></button>
+        </div>
+        <div class="card">
+          <h2 data-i18n="eval.bench.title"></h2>
+          <p data-i18n="eval.bench.description"></p>
+          <div class="chips" id="bench-dsas"></div>
+          <div class="inline-fields">
+            <label class="field"><span data-i18n="eval.bench.rates"></span><input id="bench-rates" value="25,50,100"></label>
+            <label class="field"><span data-i18n="eval.bench.seconds"></span><input id="bench-seconds" type="number" min="5" value="20"></label>
+            <label class="field"><span data-i18n="eval.bench.clients"></span><input id="bench-clients" type="number" min="2" value="20"></label>
+          </div>
+          <label class="field"><span data-i18n="eval.bench.nodes"></span>
+            <input id="bench-nodes" placeholder="http://localhost:8545,http://localhost:8546"></label>
+          <button class="primary" data-job="bench" data-i18n="eval.bench.run"></button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2 data-i18n="eval.runs.title"></h2><span class="muted" id="runs-note"></span></div>
+        <div class="jobs" id="jobs"></div>
+        <div class="job-detail hidden" id="job-detail">
+          <div class="card-head"><h3 id="job-title"></h3><span class="status" id="job-status"></span></div>
+          <pre class="console" id="job-log"></pre>
+          <article class="report" id="job-report"></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Network -->
+    <section class="panel" id="tab-network">
+      <div class="card">
+        <div class="card-head">
+          <h2 data-i18n="network.nodes.title"></h2>
+          <div class="card-tools">
+            <span class="muted" data-i18n="network.nodes.subtitle"></span>
+            <button id="btn-rescan" data-i18n="network.nodes.rescan"></button>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="data" id="nodes"></table></div>
+      </div>
+      <div class="grid grid-network">
+        <div class="card">
+          <h2 data-i18n="network.chain.title"></h2>
+          <dl class="kv" id="net-kv"></dl>
+        </div>
+        <div class="card">
+          <h2 data-i18n="network.contracts.title"></h2>
+          <div class="table-wrap"><table class="data" id="contracts"></table></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog class="modal" id="tx-dialog" aria-labelledby="tx-dialog-title">
+    <div class="modal-head">
+      <h2 id="tx-dialog-title" data-i18n="details.title"></h2>
+      <button class="icon" id="tx-dialog-close" aria-label="Close" data-i18n-aria-label="app.close">✕</button>
+    </div>
+    <div class="modal-body" id="tx-dialog-body"></div>
+  </dialog>
+
+  <div class="toast hidden" id="toast" role="status"></div>
+  <!-- i18n.js loads the language, then starts app.js. -->
+  <script src="i18n.js"></script>
+</body>
+</html>

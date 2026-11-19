@@ -1,0 +1,6 @@
+# Solidity embeds a hash of each source's exact text in the bytecode, so a CRLF checkout compiles to
+# different contracts/build files than the LF ones committed. Keep the sources LF on every platform.
+*.sol text eol=lf
+
+# Compiled from contracts/ by `npm run export`; CI checks they match the sources.
+contracts/build/* text eol=lf linguist-generated=true

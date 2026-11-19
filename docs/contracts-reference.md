@@ -135,6 +135,7 @@ Every movement (`_transfer`, `_mint`, `_burn`) goes through `_beforeTokenTransfe
 
 - `transfer` checks only that the **sender** is enabled; the recipient is not checked, so tokens can be sent to a wallet that is not enabled (and that wallet cannot move them afterwards). `transferFrom` checks both sides.
 - `frozenBalances` is not capped by the balance: freezing more than the balance just makes the wallet unable to spend.
+- `moveAndBurn` moves the funds to the token contract and burns them from there, and the burn goes through `checkAccess` with the contract's own address as sender. It therefore reverts with `Sender is not enabled` until the token contract's own address is enabled (`enableAccount(address(token))`).
 - `burnFrom` relies only on allowance. Because `mint` grants allowance to the minter, a contract that mints for a wallet (STR, swaps) can later burn up to that amount without a new `approve`.
 
 ---
@@ -211,7 +212,7 @@ Same economic operation as SwapOneStep, split into a **proposal** by the payer a
 
 | Function | Who | Description |
 |---|---|---|
-| `startSwap(tokenSender, tokenReceiver, receiver, amount)` | paying client | Stores a `PENDING` proposal with an incremental id. Emits `SwapStarted(proposalId, ...)`. Nothing moves yet. |
+| `startSwap(tokenSender, tokenReceiver, receiver, amount)` | paying client | Stores a `PENDING` proposal with an incremental id, starting at 1. Emits `SwapStarted(proposalId, ...)`. Nothing moves yet. |
 | `executeSwap(proposalId)` | receiving client only | Requires status `PENDING` and fewer than 7 days since the proposal. Runs burn → move → mint like SwapOneStep, sets `EXECUTED`, emits `SwapExecuted`. |
 | `cancelSwap(proposalId, reason)` | payer or receiver | Requires `PENDING`. Sets `CANCELLED`, emits `SwapCancelled`. |
 | `swapProposals(id)` | view | Proposal data: tokens, sender, receiver, amount, status, timestamp. |

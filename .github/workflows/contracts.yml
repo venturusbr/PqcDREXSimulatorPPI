@@ -1,0 +1,56 @@
+# Checks the Drex contracts: the compiled artifacts in contracts/build match the sources, and the
+# Hardhat test suite passes. The Java build uses those committed artifacts, so it needs no Node.js.
+name: Contracts
+
+on:
+  push:
+    paths:
+      - "contracts/**"
+      - ".gitattributes"
+      - ".github/workflows/contracts.yml"
+  pull_request:
+    paths:
+      - "contracts/**"
+      - ".gitattributes"
+      - ".github/workflows/contracts.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    name: Artifacts and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: contracts
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: contracts/package-lock.json
+
+      - name: Install the pinned toolchain
+        run: npm ci --no-audit --no-fund
+
+      - name: Recompile and export the artifacts
+        run: npm run export
+
+      - name: Compare with the committed artifacts
+        run: |
+          stale=$(git status --porcelain --untracked-files=all -- build)
+          if [ -n "$stale" ]; then
+            echo "::error title=contracts/build is out of date::Run 'npm run export' in contracts/ and commit contracts/build."
+            echo "Files that differ from a fresh export:"
+            echo "$stale"
+            git --no-pager diff --stat -- build
+            exit 1
+          fi
+          echo "contracts/build matches a fresh export of the sources."
+
+      - name: Run the contract tests on the Hardhat network
+        run: npm test

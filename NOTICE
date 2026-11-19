@@ -1,0 +1,18 @@
+PQC DREX Simulator (PqcDREXSimulatorPPI)
+Copyright 2026 Venturus
+
+Licensed under the Apache License, Version 2.0 (see LICENSE), except where noted below.
+
+This product includes the Real Digital (Drex) pilot smart contracts reconstructed by Wire Labs
+(https://github.com/wireshape/real-digital-smart-contracts), in contracts/contracts/drex/.
+Copyright (c) 2023 Wireshape.
+Licensed under the MIT License; see contracts/contracts/drex/LICENSE.
+
+The signature schemes in core/src/main/java/br/org/venturus/drexsim/crypto/ are adapted from
+besu-flex-wallet-ppi (https://github.com/venturusbr/besu-flex-wallet-ppi).
+Copyright 2026 Venturus.
+Licensed under the Apache License, Version 2.0.
+
+The runnable jar built by core/ (drexsim.jar) bundles third-party libraries, each under its own
+license, among them web3j, Jackson, picocli and OkHttp (Apache License 2.0) and Bouncy Castle
+(Bouncy Castle License, an MIT-style license).
