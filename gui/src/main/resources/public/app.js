@@ -702,31 +702,40 @@ async function loadTransactions() {
   renderTransactions();
 }
 
-/** Steps the server logs under a name of their own, not an operation's. */
-const JOB_STEPS = { 'Demo setup': 'job-step.demo', 'Network setup': 'job-step.deploy' };
+/**
+ * Steps the server logs under a name of their own, not an operation's. Both are flow 0, network setup: the
+ * network setup deploys the contracts, and the demo setup does that and then runs the demo's flows as one step.
+ */
+const JOB_STEPS = { 'Demo setup': { key: 'job-step.demo', flow: 0 }, 'Network setup': { key: 'job-step.deploy', flow: 0 } };
 
 /** Name of an operation as the server logged it (its English label), in the interface's language. */
 function operationName(label) {
   const op = state.operations.find((o) => o.label === label);
   if (op) return opLabel(op);
-  return JOB_STEPS[label] ? tr(JOB_STEPS[label]) : label;
+  return JOB_STEPS[label] ? tr(JOB_STEPS[label].key) : label;
 }
 
-/** An operation as "17. Pause token"; setup steps, which have no flow number, by name only. */
-function operationTitle(label) {
+/** Flow number of an operation or setup step as the server logged it, or null if it has none. */
+function operationFlow(label) {
   const op = state.operations.find((o) => o.label === label);
-  return op?.flow ? `${op.flow}. ${opLabel(op)}` : operationName(label);
+  return op ? op.flow ?? null : JOB_STEPS[label]?.flow ?? null;
+}
+
+/** An operation as "17. Pause token"; a setup step without a flow number by name only. */
+function operationTitle(label) {
+  const flow = operationFlow(label);
+  return flow != null ? `${flow}. ${operationName(label)}` : operationName(label);
 }
 
 /**
  * The operation as "17. Pause token". When the table is too wide for its card, fitOperations() hides the
- * names, leaving the number with the full title as a tooltip. Setup steps have no number: they keep their name.
+ * names, leaving the number with the full title as a tooltip. A setup step without a number keeps its name.
  */
 function operationCell(label) {
   if (!label) return '–';
-  const op = state.operations.find((o) => o.label === label);
-  if (!op?.flow) return esc(operationName(label));
-  return `<span class="op-cell" data-title="${esc(operationTitle(label))}"><span class="op-number">${op.flow}</span><span class="op-name">. ${esc(opLabel(op))}</span></span>`;
+  const flow = operationFlow(label);
+  if (flow == null) return esc(operationName(label));
+  return `<span class="op-cell" data-title="${esc(operationTitle(label))}"><span class="op-number">${flow}</span><span class="op-name">. ${esc(operationName(label))}</span></span>`;
 }
 
 /** Shows the operations' names only if the table then fits its card without scrolling sideways. */
