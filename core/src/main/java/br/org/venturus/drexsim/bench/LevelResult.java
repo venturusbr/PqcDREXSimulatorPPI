@@ -5,7 +5,8 @@ package br.org.venturus.drexsim.bench;
  *
  * @param targetTps submission rate asked for
  * @param offeredTps rate the generator actually submitted at
- * @param achievedTps transactions included per second, from the first submission to the last inclusion
+ * @param achievedTps transactions included per second: included transactions over the time from the first
+ *     block that included one of them to the last, or over the sending time when that is longer
  * @param latencyP50Ms submission to inclusion (block observed), 50th percentile
  * @param pending submitted and accepted, but not included when the level ended (backlog)
  * @param failedSampled receipts with status 0 among {@code sampledReceipts}
@@ -48,8 +49,16 @@ public record LevelResult(
     double maxNodeMemMb,
     String topRejection) {
 
-  /** The network kept up: it included at least 90% of the offered rate and left little backlog. */
+  /**
+   * The network kept up: something was sent, little was rejected or left as backlog, and the included rate
+   * reached 90% of the offered one, allowing one block interval more than the level's duration. Inclusion
+   * is counted in whole blocks, so a level that straddles one more block boundary, or meets one late block,
+   * is not saturation; on short levels that interval is a large share, so they detect saturation less finely.
+   */
   public boolean sustained() {
-    return achievedTps >= 0.9 * offeredTps && pending <= Math.max(5, submitted / 20);
+    long tolerance = Math.max(5, submitted / 20);
+    double slack = seconds <= 0 ? 1 : seconds / (seconds + Math.max(0, blockIntervalS));
+    return submitted > 0 && included > 0 && pending <= tolerance && rejected <= tolerance
+        && achievedTps >= 0.9 * offeredTps * slack;
   }
 }

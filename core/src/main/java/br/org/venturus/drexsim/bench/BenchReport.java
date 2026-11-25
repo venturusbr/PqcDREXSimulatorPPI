@@ -54,7 +54,9 @@ public final class BenchReport {
     StringBuilder md = new StringBuilder("# Load tests\n\nUpdated ").append(Instant.now()).append(". Workload: Drex clients ")
         .append("paying each other, same-bank Real Tokenizado transfers and inter-bank SwapOneStep swaps. Latency is from ")
         .append("submission to the block that includes the transaction. A level is *sustained* when the network ")
-        .append("included at least 90% of the offered rate with little backlog. The gas-bound ceiling is the block gas ")
+        .append("took nearly all of it (little rejected or left as backlog) and included it at 90% of the offered rate, ")
+        .append("allowing one block interval for blocks rounding the time to whole intervals; levels of a few block ")
+        .append("intervals detect saturation less finely. The gas-bound ceiling is the block gas ")
         .append("limit divided by the gas per transaction and the block interval.\n\n");
 
     md.append("## Highest sustained rate\n\n| Signer | Validators | Block gas limit | Highest sustained target (TPS) | Included TPS | p95 latency | Gas per tx | Gas-bound ceiling (TPS) | Avg tx size |\n|---|---|---|---|---|---|---|---|---|\n");

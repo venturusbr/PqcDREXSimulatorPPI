@@ -1075,17 +1075,106 @@ function checked(container) {
   return [...document.querySelectorAll(`${container} input:checked`)].map((i) => i.value);
 }
 
+// ------------------------------------------------------------------ load test inputs
+
+/** The load test's bounds, as LoadTest.Config checks them on the server. */
+const BENCH = { minClients: 2, maxClients: 500, maxRate: 10000, minSeconds: 5, maxSeconds: 3600 };
+const BENCH_FIELDS = ['dsas', 'rates', 'seconds', 'clients', 'nodes'];
+/** Fields whose error is shown: each once the user leaves it, all once they try to run. */
+const benchTouched = new Set();
+
+const wholeNumber = (text) => (/^\s*\d+\s*$/.test(text) ? Number(text) : NaN);
+const csv = (text) => text.split(',').map((s) => s.trim()).filter(Boolean);
+const number = (n) => n.toLocaleString(document.documentElement.lang || 'en-US');
+
+function isNodeUrl(text) {
+  try {
+    const url = new URL(text);
+    return (url.protocol === 'http:' || url.protocol === 'https:') && !!url.hostname;
+  } catch {
+    return false;
+  }
+}
+
+/** The load test request and, per field, what is wrong with it ('' when nothing is). */
+function benchInputs() {
+  const dsas = checked('#bench-dsas');
+  const seconds = wholeNumber($('#bench-seconds').value);
+  const clients = wholeNumber($('#bench-clients').value);
+  const rates = csv($('#bench-rates').value).map((s) => (/^\d+(\.\d+)?$/.test(s) ? Number(s) : NaN));
+  const nodes = csv($('#bench-nodes').value);
+  const secondsOk = seconds >= BENCH.minSeconds && seconds <= BENCH.maxSeconds;
+  let ratesError = '';
+  if (!rates.length || rates.some((r) => !(r > 0) || r > BENCH.maxRate)) {
+    ratesError = tr('eval.bench.invalid.rates', { max: number(BENCH.maxRate) });
+  } else if (secondsOk) {
+    const idle = rates.find((r) => Math.round(r * seconds) < 1);
+    if (idle !== undefined) ratesError = tr('eval.bench.invalid.empty-level', { rate: number(idle), seconds });
+  }
+  const badNode = nodes.find((u) => !isNodeUrl(u));
+  return {
+    body: { dsas, rates, seconds, clients, nodes },
+    errors: {
+      dsas: dsas.length ? '' : tr('eval.bench.invalid.dsas'),
+      rates: ratesError,
+      seconds: secondsOk ? '' : tr('eval.bench.invalid.seconds', { min: BENCH.minSeconds, max: number(BENCH.maxSeconds) }),
+      clients: clients >= BENCH.minClients && clients <= BENCH.maxClients
+        ? '' : tr('eval.bench.invalid.clients', { min: BENCH.minClients, max: BENCH.maxClients }),
+      nodes: badNode === undefined ? '' : tr('eval.bench.invalid.nodes', { url: badNode }),
+    },
+  };
+}
+
+/** Shows the errors of the touched fields under them; returns the request, or null while any field is wrong. */
+function checkBenchInputs() {
+  const { body, errors } = benchInputs();
+  for (const field of BENCH_FIELDS) {
+    const message = benchTouched.has(field) ? errors[field] : '';
+    const note = $(`#bench-${field}-error`);
+    note.textContent = message;
+    note.classList.toggle('hidden', !message);
+    const input = field === 'dsas' ? $('#bench-dsas') : $(`#bench-${field}`);
+    input.classList.toggle('invalid', !!message);
+    if (field === 'dsas') input.setAttribute('aria-invalid', String(!!message));
+    else input.setCustomValidity(message);
+  }
+  return BENCH_FIELDS.some((f) => errors[f]) ? null : body;
+}
+
+for (const field of BENCH_FIELDS) {
+  const input = $(`#bench-${field}`);
+  input.addEventListener('change', () => { benchTouched.add(field); checkBenchInputs(); });
+  input.addEventListener('input', () => { if (benchTouched.size) checkBenchInputs(); renderBenchPlan(); });
+}
+
+/** Says, under the form, that the whole test runs again for each selected algorithm, and what each run does. */
+function renderBenchPlan() {
+  const { body, errors } = benchInputs();
+  const plan = $('#bench-plan');
+  if (!body.dsas.length || errors.rates || errors.seconds || errors.clients) {
+    plan.textContent = tr('eval.bench.plan-once');
+    return;
+  }
+  plan.textContent = tr(body.dsas.length === 1 ? 'eval.bench.plan-one' : 'eval.bench.plan', {
+    n: body.dsas.length,
+    clients: 2 * body.clients,
+    levels: body.rates.length,
+    seconds: body.seconds,
+  });
+}
+renderBenchPlan();
+
 async function startJob(kind) {
   let body = {};
   if (kind === 'flows') body = { dsas: checked('#flows-dsas') };
   if (kind === 'bench') {
-    body = {
-      dsas: checked('#bench-dsas'),
-      rates: $('#bench-rates').value.split(',').map((s) => Number(s.trim())).filter((n) => n > 0),
-      seconds: Number($('#bench-seconds').value),
-      clients: Number($('#bench-clients').value),
-      nodes: $('#bench-nodes').value.split(',').map((s) => s.trim()).filter(Boolean),
-    };
+    BENCH_FIELDS.forEach((f) => benchTouched.add(f));
+    body = checkBenchInputs();
+    if (!body) {
+      const first = $('#tab-evaluation .field-error:not(.hidden)')?.id.replace('-error', '');
+      (first === 'bench-dsas' ? $('#bench-dsas input') : $(`#${first}`))?.focus();
+      return;
+    }
   }
   try {
     const job = await api(`/api/jobs/${kind}`, { method: 'POST', body });
@@ -1110,6 +1199,19 @@ async function loadJobs() {
   renderJobs();
 }
 
+/** A job that has not ended: it still blocks the others. */
+const isActive = (status) => status === 'running' || status === 'stopping';
+
+$('#btn-stop-job').addEventListener('click', async () => {
+  const id = state.selectedJob;
+  try {
+    const summary = await api(`/api/jobs/${id}/stop`, { method: 'POST' });
+    onJob(summary);
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
 function renderJobs() {
   const jobs = [...state.jobs.values()].sort((a, b) => b.id - a.id);
   $('#jobs').innerHTML = jobs.length ? jobs.map((j) => `<div class="job ${j.id === state.selectedJob ? 'selected' : ''}" data-id="${j.id}">
@@ -1117,7 +1219,7 @@ function renderJobs() {
       <span class="when">${time(j.startedAt)}${j.endedAt ? ` – ${time(j.endedAt)}` : ''}</span>
     </div>`).join('') : `<p class="muted">${tr('eval.runs.empty')}</p>`;
   document.querySelectorAll('.job').forEach((el) => el.addEventListener('click', () => selectJob(Number(el.dataset.id))));
-  const running = jobs.some((j) => j.status === 'running');
+  const running = jobs.some((j) => isActive(j.status));
   document.querySelectorAll('[data-job], #btn-demo, #btn-deploy').forEach((b) => { b.disabled = running; });
 }
 
@@ -1135,7 +1237,10 @@ function renderJobDetail() {
   if (!job) return;
   $('#job-title').textContent = jobTitle(job);
   $('#job-status').className = `status ${job.status}`;
-  $('#job-status').textContent = statusLabel(job.status) + (job.error ? `: ${job.error}` : '');
+  $('#job-status').textContent = statusLabel(job.status) + (job.error && job.status !== 'stopped' ? `: ${job.error}` : '');
+  const stop = $('#btn-stop-job');
+  stop.classList.toggle('hidden', !isActive(job.status));
+  stop.disabled = job.status === 'stopping';
   const log = $('#job-log');
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
   log.textContent = (job.log || []).join('\n') || tr('app.starting');
@@ -1168,7 +1273,7 @@ async function onJob(summary) {
   const known = state.jobs.get(summary.id);
   state.jobs.set(summary.id, { ...(known || {}), ...summary, log: known?.log || [] });
   renderJobs();
-  if (summary.status !== 'running') {
+  if (!isActive(summary.status)) {
     if (summary.id === state.selectedJob) selectJob(summary.id);
     if (summary.id === setupJob) {
       if (summary.status === 'done') {

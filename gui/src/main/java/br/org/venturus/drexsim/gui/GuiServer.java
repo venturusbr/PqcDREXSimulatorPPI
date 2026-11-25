@@ -31,6 +31,7 @@ import picocli.CommandLine.Option;
  * GET  /api/abi                     selectors, event topics and role ids of the Drex contracts
  * GET  /api/languages               the interface's languages: the files in /public/i18n
  * POST /api/jobs/{demo|deploy|flows|security|bench}   starts a background job
+ * POST /api/jobs/{id}/stop                            stops a running job
  * GET  /api/jobs, /api/jobs/{id}    job status, log and report
  * GET  /api/events                  Server-Sent Events: block, tx, job, job-log, accounts, balances-changed
  * </pre>
@@ -150,9 +151,12 @@ public final class GuiServer implements Callable<Integer> {
     app.post("/api/jobs/bench", ctx -> {
       BenchRequest b = ctx.body().isBlank() ? new BenchRequest(null, null, null, null, null) : ctx.bodyAsClass(BenchRequest.class);
       ctx.status(HttpStatus.ACCEPTED).json(JobRunner.Summary.of(service.startBench(b.dsas(),
-          b.rates() == null || b.rates().isEmpty() ? List.of(25.0, 50.0, 100.0) : b.rates(),
+          // Defaults only for a missing field: an empty or invalid one is refused, not replaced.
+          b.rates() == null ? List.of(25.0, 50.0, 100.0) : b.rates(),
           b.seconds() == null ? 20 : b.seconds(), b.clients() == null ? 20 : b.clients(), b.nodes())));
     });
+    app.post("/api/jobs/{id}/stop", ctx -> ctx.status(HttpStatus.ACCEPTED)
+        .json(JobRunner.Summary.of(service.jobs().stop(ctx.pathParamAsClass("id", Long.class).get()))));
     app.get("/api/jobs", ctx -> ctx.json(service.jobs().list()));
     app.get("/api/jobs/{id}", ctx -> {
       JobRunner.Job job = service.jobs().get(ctx.pathParamAsClass("id", Long.class).get());

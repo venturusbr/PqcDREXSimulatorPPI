@@ -577,15 +577,39 @@ final class SimulatorService implements AutoCloseable {
   JobRunner.Job startBench(List<String> dsas, List<Double> rates, int seconds, int clients, List<String> nodes) {
     List<String> endpoints = nodes == null || nodes.isEmpty() ? List.of(rpcUrl) : nodes;
     List<String> profiles = dsas == null || dsas.isEmpty() ? List.of("SECP256K1:std", "SECP256K1-MLDSA44") : dsas;
+    // Invalid input and unreachable nodes are refused here, before the job starts, not after its setup.
+    List<LoadTest.Config> configs = profiles.stream()
+        .map(dsa -> new LoadTest.Config(endpoints, SignerProfile.parse(dsa), clients, rates, seconds, 0.3, 30, 16))
+        .toList();
+    endpoints.forEach(this::checkBenchNode);
     return jobs.start("bench", "Load test", log -> {
       Path dir = reportDir("bench");
-      for (String dsa : profiles) {
-        LoadTest test = new LoadTest(new LoadTest.Config(endpoints, SignerProfile.parse(dsa), clients, rates, seconds,
-            0.3, 30, 16), log);
-        BenchReport.append(dir, test.run());
+      for (int i = 0; i < configs.size(); i++) {
+        LoadTest.Config config = configs.get(i);
+        log.accept(String.format("== Algorithm %d of %d: %s (setup, then %s TPS for %d s each)", i + 1, configs.size(),
+            config.profile().label(), rates.stream().map(r -> r % 1 == 0 ? String.valueOf(r.longValue()) : String.valueOf(r))
+                .collect(java.util.stream.Collectors.joining(", ")), seconds));
+        BenchReport.append(dir, new LoadTest(config, log).run());
       }
       return Files.readString(dir.resolve("bench.md"));
     });
+  }
+
+  /** Fails unless {@code url} answers JSON-RPC on this simulator's chain. */
+  private void checkBenchNode(String url) {
+    long id;
+    try {
+      id = Rpc.quantity(Rpc.call(url, "eth_chainId"));
+    } catch (java.net.ConnectException e) {
+      throw new IllegalArgumentException("Node " + url + " is not reachable: connection refused");
+    } catch (java.net.http.HttpTimeoutException e) {
+      throw new IllegalArgumentException("Node " + url + " is not reachable: no answer in time");
+    } catch (IOException | RuntimeException e) {
+      throw new IllegalArgumentException("Node " + url + " does not answer JSON-RPC: " + rootMessage(e));
+    }
+    if (id != chain.chainId()) {
+      throw new IllegalArgumentException("Node " + url + " is on chain " + id + ", not " + chain.chainId());
+    }
   }
 
   private Path reportDir(String kind) {
