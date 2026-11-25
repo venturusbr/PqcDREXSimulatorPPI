@@ -72,6 +72,9 @@
           <div class="card-head">
             <h2 data-i18n="balances.title"></h2>
             <div class="card-tools">
+              <input type="search" class="table-filter" id="balances-filter" placeholder="Filter by wallet or address"
+                data-i18n-placeholder="filter.balances" aria-label="Filter by wallet or address" data-i18n-aria-label="filter.balances"
+                title="Filter by wallet or address" data-i18n-title="filter.balances">
               <div class="segmented" id="balances-view" role="radiogroup" aria-label="View" data-i18n-aria-label="balances.view">
                 <button type="button" role="radio" data-view="split" title="By role" data-i18n-title="balances.view.split-hint"
                   data-i18n="balances.view.split"></button>
@@ -85,12 +88,12 @@
           <div class="paused-note hidden" id="paused-note" role="status"></div>
           <div id="balances-split">
             <h3 class="subhead"><span data-i18n="balances.participants.title"></span> <span class="small" data-i18n="balances.participants.hint"></span></h3>
-            <div class="table-wrap"><table class="data balances" id="balances-participants"></table></div>
+            <div class="table-wrap scroll"><table class="data balances" id="balances-participants"></table></div>
             <h3 class="subhead"><span data-i18n="balances.clients.title"></span> <span class="small" data-i18n="balances.clients.hint"></span></h3>
-            <div class="table-wrap"><table class="data balances" id="balances-clients"></table></div>
+            <div class="table-wrap scroll"><table class="data balances" id="balances-clients"></table></div>
             <div class="balances-note" id="balances-note" role="note"></div>
           </div>
-          <div class="table-wrap hidden" id="balances-unified-wrap"><table class="data balances" id="balances-unified"></table></div>
+          <div class="table-wrap scroll hidden" id="balances-unified-wrap"><table class="data balances" id="balances-unified"></table></div>
           <p class="legend">
             <span class="badge pq" data-i18n="family.pq"></span>
             <span class="badge hybrid" data-i18n="family.hybrid"></span>
@@ -115,9 +118,14 @@
       <div class="card">
         <div class="card-head">
           <h2 data-i18n="txs.title"></h2>
-          <span class="muted" data-i18n="txs.subtitle"></span>
+          <div class="card-tools">
+            <span class="muted" data-i18n="txs.subtitle"></span>
+            <input type="search" class="table-filter" id="txs-filter" placeholder="Filter by operation, contract, account or hash"
+              data-i18n-placeholder="filter.txs" aria-label="Filter by operation, contract, account or hash" data-i18n-aria-label="filter.txs"
+              title="Filter by operation, contract, account or hash" data-i18n-title="filter.txs">
+          </div>
         </div>
-        <div class="table-wrap"><table class="data" id="txs"></table></div>
+        <div class="table-wrap scroll"><table class="data" id="txs"></table></div>
       </div>
     </section>
 
@@ -125,8 +133,15 @@
     <section class="panel" id="tab-accounts">
       <div class="grid">
         <div class="card">
-          <div class="card-head"><h2 data-i18n="accounts.title"></h2><span class="muted" data-i18n="accounts.subtitle"></span></div>
-          <div class="table-wrap"><table class="data" id="accounts"></table></div>
+          <div class="card-head"><h2 data-i18n="accounts.title"></h2>
+            <div class="card-tools">
+              <span class="muted" data-i18n="accounts.subtitle"></span>
+              <input type="search" class="table-filter" id="accounts-filter" placeholder="Filter by name or address"
+                data-i18n-placeholder="filter.accounts" aria-label="Filter by name or address" data-i18n-aria-label="filter.accounts"
+                title="Filter by name or address" data-i18n-title="filter.accounts">
+            </div>
+          </div>
+          <div class="table-wrap scroll"><table class="data" id="accounts"></table></div>
         </div>
         <div class="card op-card">
           <div class="card-head"><h2 data-i18n="accounts.new.title"></h2></div>
@@ -216,6 +231,10 @@
     <div class="modal-body" id="tx-dialog-body"></div>
   </dialog>
 
+  <button type="button" class="to-top hidden" id="to-top" title="Back to top" data-i18n-title="app.to-top"
+    aria-label="Back to top" data-i18n-aria-label="app.to-top">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+  </button>
   <div class="toast hidden" id="toast" role="status"></div>
   <!-- i18n.js loads the language, then starts app.js. -->
   <script src="i18n.js"></script>

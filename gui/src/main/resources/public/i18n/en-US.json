@@ -17,6 +17,7 @@
   "app.starting": "Starting…",
   "app.subtitle": "Real Digital pilot on Besu PQC",
   "app.title": "PQC Drex Simulator",
+  "app.to-top": "Back to top",
   "balances.bank": "Bank",
   "balances.bank-hint": "The bank whose Real Tokenizado the client is enabled in, as the contracts say; for a reserve wallet, the bank it is the reserve of",
   "balances.client": "Client",
@@ -166,6 +167,10 @@
   "field.toToken": "Receiver's Real Tokenizado",
   "field.token": "Real Tokenizado",
   "field.wallet": "Wallet",
+  "filter.accounts": "Filter by name or address",
+  "filter.balances": "Filter by wallet or address",
+  "filter.no-match": "Nothing matches “{q}”.",
+  "filter.txs": "Filter by operation, contract, account or hash",
   "job-step.demo": "Demo setup",
   "job-step.deploy": "Network setup",
   "job.bench": "Load test",
@@ -312,6 +317,6 @@
   "txs.open-details": "Show the transaction details",
   "txs.signature-key": "Signature / key",
   "txs.size": "Size",
-  "txs.subtitle": "Sent from this interface, newest first. Receipts update live.",
+  "txs.subtitle": "Only transactions sent from this interface",
   "txs.title": "Transactions"
 }

@@ -372,6 +372,22 @@ const INSTITUTION_ROLES = ['bcb', 'participant', 'reserve'];
  * both. A wallet holding a token outside its role (e.g. RD sent to a client: transfer() checks only the
  * sender) is also listed where that token is, so each table's sum always matches the supply.
  */
+// ---- table filters: one search box per table, matched case-insensitively against some of its columns
+
+/** What was typed in a table's search box, trimmed. */
+const filterQuery = (id) => ($(`#${id}`)?.value || '').trim();
+/** Whether any of the fields contains the query (always, when the query is empty). */
+function matchesFilter(query, ...fields) {
+  const q = query.toLowerCase();
+  return !q || fields.some((f) => f != null && String(f).toLowerCase().includes(q));
+}
+/** The row shown when the search box hides every row. */
+const noMatchRow = (cols, query) => `<tr class="empty-row"><td colspan="${cols}">${esc(tr('filter.no-match', { q: query }))}</td></tr>`;
+/** A balances row passes the search box when its wallet name or address contains the query. */
+const walletMatches = (query) => (w) => matchesFilter(query, w.wallet.label, w.wallet.address);
+
+$('#balances-filter').addEventListener('input', () => renderBalances());
+
 // ---- balances view: split (participants and clients) or unified (one table); remembered per browser
 
 const BALANCES_VIEWS = ['split', 'unified'];
@@ -455,6 +471,7 @@ function renderUnifiedBalances(snap, prev) {
     return;
   }
   const hideEmpty = $('#hide-empty').checked;
+  const query = filterQuery('balances-filter');
   const rd = snap.tokens.find((t) => t.symbol === 'BRL');
   const rts = snap.tokens.filter((t) => t.symbol !== 'BRL');
   const changed = balanceChanges(prev);
@@ -462,6 +479,7 @@ function renderUnifiedBalances(snap, prev) {
   const rtSums = Object.fromEntries(rts.map((t) => [t.symbol, 0]));
   const rows = snap.wallets
     .filter((w) => !hideEmpty || snap.tokens.some((t) => holdsToken(w, t.symbol)))
+    .filter(walletMatches(query))
     .map((w) => {
       const h = w.holdings.BRL || NO_HOLDING;
       rdSum += Number(h.balance);
@@ -472,7 +490,7 @@ function renderUnifiedBalances(snap, prev) {
     }).join('');
   table.innerHTML = `<thead><tr><th>${tr('balances.wallet')}</th>${bankTh()}<th>${tr('common.signs-with')}</th><th>${tr('common.address')}</th>
       ${rdTh(rd)}<th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
-    <tbody>${rows || `<tr class="empty-row"><td colspan="6">${tr('balances.empty')}</td></tr>`}</tbody>
+    <tbody>${rows || (query ? noMatchRow(6, query) : `<tr class="empty-row"><td colspan="6">${tr('balances.empty')}</td></tr>`)}</tbody>
     <tfoot><tr><td colspan="4">${tr('balances.sum')}</td><td class="num">${money(rdSum)}</td><td class="num rt">${perTokenHtml(rts, rtSums)}</td></tr>
     <tr class="supply"><td colspan="4">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td>
       <td class="num rt">${perTokenHtml(rts, snap.totalSupply)}</td></tr></tfoot>`;
@@ -492,6 +510,8 @@ function renderSplitBalances(snap, prev) {
     return;
   }
   const hideEmpty = $('#hide-empty').checked;
+  const query = filterQuery('balances-filter');
+  const shown = walletMatches(query);
   const rd = snap.tokens.find((t) => t.symbol === 'BRL');
   const rts = snap.tokens.filter((t) => t.symbol !== 'BRL');
   const changed = balanceChanges(prev);
@@ -506,6 +526,7 @@ function renderSplitBalances(snap, prev) {
   let rdSum = 0;
   const participantRows = snap.wallets.filter(isParticipant)
     .filter((w) => !hideEmpty || holds(w, 'BRL'))
+    .filter(shown)
     .map((w) => {
       const h = w.holdings.BRL || NO_HOLDING;
       rdSum += Number(h.balance);
@@ -513,7 +534,7 @@ function renderSplitBalances(snap, prev) {
     }).join('');
   participants.innerHTML = `<thead><tr><th>${tr('balances.participant')}</th><th>${tr('common.signs-with')}</th>
       <th>${tr('common.address')}</th>${rdTh(rd)}</tr></thead>
-    <tbody>${participantRows || `<tr class="empty-row"><td colspan="4">${tr('balances.participants.empty')}</td></tr>`}</tbody>
+    <tbody>${participantRows || (query ? noMatchRow(4, query) : `<tr class="empty-row"><td colspan="4">${tr('balances.participants.empty')}</td></tr>`)}</tbody>
     <tfoot><tr><td colspan="3">${tr('balances.participants.sum')}</td><td class="num">${money(rdSum)}</td></tr>
     <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td></tr></tfoot>`;
 
@@ -521,6 +542,7 @@ function renderSplitBalances(snap, prev) {
   const rtSums = Object.fromEntries(rts.map((t) => [t.symbol, 0]));
   const clientRows = snap.wallets.filter(isClient)
     .filter((w) => !hideEmpty || holdsRt(w))
+    .filter(shown)
     .map((w) => {
       rts.filter((t) => holds(w, t.symbol)).forEach((t) => { rtSums[t.symbol] += Number(w.holdings[t.symbol].balance); });
       return `<tr>${walletCells(w, rts)}<td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
@@ -528,12 +550,12 @@ function renderSplitBalances(snap, prev) {
   const perToken = (values) => perTokenHtml(rts, values);
   clients.innerHTML = `<thead><tr><th>${tr('balances.client')}</th>${bankTh()}<th>${tr('common.signs-with')}</th>
       <th>${tr('common.address')}</th><th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
-    <tbody>${clientRows || `<tr class="empty-row"><td colspan="5">${tr('balances.clients.empty')}</td></tr>`}</tbody>
+    <tbody>${clientRows || (query ? noMatchRow(5, query) : `<tr class="empty-row"><td colspan="5">${tr('balances.clients.empty')}</td></tr>`)}</tbody>
     <tfoot><tr><td colspan="4">${tr('balances.clients.sum')}</td><td class="num rt">${perToken(rtSums)}</td></tr>
     <tr class="supply"><td colspan="4">${tr('balances.total-supply')}</td><td class="num rt">${perToken(snap.totalSupply)}</td></tr></tfoot>`;
 
   // Accounts in neither table: never enabled anywhere and holding nothing.
-  const unlisted = hideEmpty ? [] : snap.wallets.filter((w) => !isParticipant(w) && !isClient(w));
+  const unlisted = hideEmpty ? [] : snap.wallets.filter((w) => !isParticipant(w) && !isClient(w)).filter(shown);
   note.innerHTML = unlisted.length ? `${roleIcon('none', tr('role.none.hint'))}
     <div><b>${trn('balances.unlisted.title', unlisted.length)}</b>
       <span class="muted">${tr('balances.unlisted.text')}</span>
@@ -554,7 +576,8 @@ async function loadAccounts() {
 
 function renderAccounts() {
   const byAddress = new Map((state.snapshot?.wallets || []).map((w) => [w.wallet.address.toLowerCase(), w]));
-  const rows = state.accounts.map((a) => {
+  const query = filterQuery('accounts-filter');
+  const rows = state.accounts.filter((a) => matchesFilter(query, a.name, a.address)).map((a) => {
     const w = byAddress.get(a.address.toLowerCase());
     // Roles are read with the balances; an account created since the last snapshot has none yet.
     const roles = w ? `<span class="roles">${roleIcons(w)}</span>` : (state.deployment ? '<span class="roles"></span>' : '');
@@ -568,8 +591,26 @@ function renderAccounts() {
   }).join('');
   $('#accounts').innerHTML = `<thead><tr><th>${tr('common.name')}</th><th>${tr('common.signs-with')}</th><th>${tr('txs.title')}</th><th>${tr('common.address')}</th>
     <th class="num">${tr('common.public-key')}</th></tr></thead>
-    <tbody>${rows || `<tr class="empty-row"><td colspan="5">${tr('accounts.empty')}</td></tr>`}</tbody>`;
+    <tbody>${rows || (query ? noMatchRow(5, query) : `<tr class="empty-row"><td colspan="5">${tr('accounts.empty')}</td></tr>`)}</tbody>`;
 }
+
+$('#accounts-filter').addEventListener('input', () => renderAccounts());
+
+/**
+ * Makes the accounts table at least tall enough for its card to match the New account panel beside it, so
+ * the two end together; the CSS lets it grow up to the window's height from there before it scrolls inside.
+ */
+function fitAccountsTable() {
+  const wrap = $('#accounts').parentElement;
+  const card = wrap.closest('.card');
+  const panel = $('#tab-accounts .op-card');
+  if (!panel.offsetHeight) return; // tab hidden: the observer runs this again when it shows
+  const fit = Math.max(0, panel.offsetHeight - (card.offsetHeight - wrap.offsetHeight));
+  if (wrap.style.getPropertyValue('--fit') !== `${fit}px`) wrap.style.setProperty('--fit', `${fit}px`);
+}
+const accountsObserver = new ResizeObserver(fitAccountsTable);
+accountsObserver.observe($('#tab-accounts .op-card'));
+accountsObserver.observe($('#accounts').closest('.card'));
 
 function updateStandardToggle() {
   const dsa = $('#account-dsa').value;
@@ -846,9 +887,17 @@ function contractCell(to, book) {
   return known ? `<span title="${esc(to)}">${esc(known.name)}</span>` : `<span class="small" title="${esc(to)}">${esc(shortAddr(to))}</span>`;
 }
 
+/** A transaction passes the search box when its operation, contract (name or address), account or hash contains the query. */
+function txMatches(tx, query, book) {
+  if (!query) return true;
+  const contract = tx.to ? book.get(tx.to.toLowerCase())?.name : tr('details.to-creation');
+  return matchesFilter(query, tx.operation && operationTitle(tx.operation), tx.operation, contract, tx.to, tx.account, tx.hash);
+}
+
 function renderTransactions() {
   const book = addressBook();
-  const rows = [...state.txs.values()].sort((a, b) => b.id - a.id).slice(0, 200).map((tx) => {
+  const query = filterQuery('txs-filter');
+  const rows = [...state.txs.values()].sort((a, b) => b.id - a.id).filter((tx) => txMatches(tx, query, book)).slice(0, 200).map((tx) => {
     const gas = tx.gasUsed != null ? `${num(tx.gasUsed)} <span class="small">/ ${num(tx.gasLimit)}</span>`
       : `<span class="small">${tr('txs.gas-limit', { n: num(tx.gasLimit) })}</span>`;
     const keyBytes = tx.publicKeyBytes ? `${num(tx.publicKeyBytes)} B` : tr('txs.key-recovered');
@@ -871,9 +920,20 @@ function renderTransactions() {
   $('#txs').innerHTML = `<thead><tr><th>${tr('common.time')}</th><th>${tr('common.operation')}</th><th>${tr('txs.contract')}</th><th>${tr('txs.account')}</th><th>${tr('common.signs-with')}</th>
     <th class="num">${tr('txs.size')}</th><th class="num">${tr('txs.signature-key')}</th><th class="num">${tr('txs.gas')}</th><th>${tr('common.status')}</th>
     <th>${tr('txs.hash')}</th></tr></thead>
-    <tbody>${rows || `<tr class="empty-row"><td colspan="10">${tr('txs.empty')}</td></tr>`}</tbody>`;
+    <tbody>${rows || (query ? noMatchRow(10, query) : `<tr class="empty-row"><td colspan="10">${tr('txs.empty')}</td></tr>`)}</tbody>`;
   fitOperations();
 }
+
+$('#txs-filter').addEventListener('input', () => renderTransactions());
+
+// ------------------------------------------------------------------ back to top
+
+/** A floating button, shown once the page has scrolled, that scrolls back to the top (on every tab). */
+const toTop = $('#to-top');
+const updateToTop = () => toTop.classList.toggle('hidden', scrollY < 300);
+addEventListener('scroll', updateToTop, { passive: true });
+toTop.addEventListener('click', () => scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
+updateToTop();
 
 // ------------------------------------------------------------------ transaction details
 

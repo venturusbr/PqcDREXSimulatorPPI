@@ -17,6 +17,7 @@
   "app.starting": "Iniciando…",
   "app.subtitle": "Piloto do Real Digital no Besu PQC",
   "app.title": "Simulador Drex PQC",
+  "app.to-top": "Voltar ao topo",
   "balances.bank": "Banco",
   "balances.bank-hint": "O banco em cujo Real Tokenizado o cliente está habilitado, segundo os contratos; para uma carteira de reserva, o banco de que ela é a reserva",
   "balances.client": "Cliente",
@@ -166,6 +167,10 @@
   "field.toToken": "Real Tokenizado do recebedor",
   "field.token": "Real Tokenizado",
   "field.wallet": "Carteira",
+  "filter.accounts": "Filtrar por nome ou endereço",
+  "filter.balances": "Filtrar por carteira ou endereço",
+  "filter.no-match": "Nada corresponde a “{q}”.",
+  "filter.txs": "Filtrar por operação, contrato, conta ou hash",
   "job-step.demo": "Montagem da demonstração",
   "job-step.deploy": "Implantação da rede",
   "job.bench": "Teste de carga",
@@ -312,6 +317,6 @@
   "txs.open-details": "Mostrar os detalhes da transação",
   "txs.signature-key": "Assinatura / chave",
   "txs.size": "Tamanho",
-  "txs.subtitle": "Enviadas por esta interface, as mais recentes primeiro. Os recibos são atualizados ao vivo.",
+  "txs.subtitle": "Somente transações enviadas por esta interface",
   "txs.title": "Transações"
 }
