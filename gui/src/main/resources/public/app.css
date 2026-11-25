@@ -286,7 +286,7 @@ td.flash { animation: flash 1.6s ease-out; }
 
 .status { display: inline-block; font-size: 11.5px; font-weight: 650; border-radius: 999px; padding: 1px 8px; text-transform: lowercase; }
 .status.success, .status.done { color: var(--ok); background: var(--ok-soft); }
-.status.pending, .status.running { color: var(--warn); background: var(--warn-soft); }
+.status.pending, .status.running, .status.paused { color: var(--warn); background: var(--warn-soft); }
 .status.reverted, .status.rejected, .status.failed { color: var(--err); background: var(--err-soft); }
 .hash { font-family: var(--mono); font-size: 12px; cursor: copy; }
 .small { font-size: 12px; color: var(--muted); }
@@ -396,6 +396,19 @@ pre.raw {
   vertical-align: 1px;
 }
 .token-tag.none { color: var(--muted); background: var(--surface-2); }
+/* Paused token: muted and dashed, with a pause sign, so it reads without relying on color. */
+.pause-icon { width: 10px; height: 10px; fill: currentColor; vertical-align: -1px; margin-right: 3px; flex: none; }
+.token-tag.paused { color: var(--muted); background: var(--surface-2); outline: 1px dashed var(--muted); outline-offset: -1px; }
+.paused-badge {
+  display: inline-flex; align-items: center; padding: 0 6px; border-radius: 4px; font-size: 11px; font-weight: 650;
+  color: var(--warn); background: var(--warn-soft); vertical-align: 1px;
+}
+.paused-note, .op-warning {
+  display: flex; align-items: flex-start; gap: 8px; margin: 4px 0 12px; padding: 8px 12px; border-radius: 8px;
+  font-size: 13px; color: var(--text); background: var(--warn-soft); border: 1px solid var(--warn);
+}
+.paused-note .pause-icon, .op-warning .pause-icon { width: 14px; height: 14px; margin: 2px 0 0; color: var(--warn); }
+.paused-note.hidden, .op-warning.hidden { display: none; }
 .rt-line + .rt-line { margin-top: 2px; }
 .balances td.bank { white-space: nowrap; }
 .balances td.rt .frozen { margin-right: 54px; }

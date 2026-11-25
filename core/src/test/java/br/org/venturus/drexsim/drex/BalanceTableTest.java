@@ -60,6 +60,15 @@ class BalanceTableTest {
   }
 
   @Test
+  void marksPausedTokensInTheHeader() {
+    Snapshot s = snapshot();
+    List<Token> tokens = List.of(s.tokens().get(0), new Token("BRLA", "Real Tokenizado Banco A", "0x02", "bank-a", true));
+    String table = BalanceTable.render(new Snapshot(s.blockNumber(), s.takenAt(), tokens, s.wallets(), s.totalSupply()), false);
+    assertTrue(table.contains("RT BRLA (paused)"), table);
+    assertTrue(table.contains("RD (BRL) ") && !table.contains("RD (BRL) (paused)"), table);
+  }
+
+  @Test
   void hidesEmptyWalletsOnRequest() {
     assertFalse(BalanceTable.render(snapshot(), true).contains("idle"));
   }

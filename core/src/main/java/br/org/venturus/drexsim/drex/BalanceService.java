@@ -55,11 +55,20 @@ public final class BalanceService {
    * A token column: Real Digital or one participant's Real Tokenizado. {@code issuer} names the bank that
    * issues a Real Tokenizado: the label of its wallet when the snapshot shows that wallet (e.g. {@code bank-a},
    * as in the wallet column), otherwise the participant name given when the token was deployed (e.g. {@code
-   * Banco A}, which {@code name} also holds). It is null for Real Digital.
+   * Banco A}, which {@code name} also holds). It is null for Real Digital. {@code paused} is the token's
+   * {@code paused()} at the snapshot's block: while it is true, every movement of the token reverts.
    */
-  public record Token(String symbol, String name, String address, String issuer) {
+  public record Token(String symbol, String name, String address, String issuer, boolean paused) {
     public Token(String symbol, String name, String address) {
-      this(symbol, name, address, null);
+      this(symbol, name, address, null, false);
+    }
+
+    public Token(String symbol, String name, String address, String issuer) {
+      this(symbol, name, address, issuer, false);
+    }
+
+    Token withPaused(boolean paused) {
+      return new Token(symbol, name, address, issuer, paused);
     }
   }
 
@@ -132,8 +141,10 @@ public final class BalanceService {
     CallBatch calls = new CallBatch(DefaultBlockParameter.valueOf(BigInteger.valueOf(block)));
 
     Map<String, Integer> supply = new LinkedHashMap<>();
+    List<Integer> paused = new ArrayList<>();
     for (Token token : tokens) {
       supply.put(token.symbol(), calls.add(token.address(), fn("totalSupply", List.of(), UINT)));
+      paused.add(calls.add(token.address(), fn("paused", List.of(), BOOL)));
     }
     // Reserve wallets, as each Real Tokenizado records them.
     List<Integer> reserves = new ArrayList<>();
@@ -159,6 +170,10 @@ public final class BalanceService {
     }
 
     calls.send();
+
+    for (int i = 0; i < tokens.size(); i++) {
+      tokens.set(i, tokens.get(i).withPaused(calls.get(paused.get(i))));
+    }
 
     // Reserve address -> the Real Tokenizados it is the reserve of.
     Map<String, List<String>> reserveOf = new LinkedHashMap<>();

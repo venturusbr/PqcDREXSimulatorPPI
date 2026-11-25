@@ -244,9 +244,39 @@ function renderContracts() {
     ['SwapOneStep', d.swapOneStep], ['SwapTwoSteps', d.swapTwoSteps], ['AddressDiscovery', d.addressDiscovery],
     ...(d.realTokenizados || []).map((t) => [`RealTokenizado ${t.symbol} (${t.participant})`, t.address]),
   ];
-  $('#contracts').innerHTML = `<thead><tr><th>${tr('network.contracts.contract')}</th><th>${tr('common.address')}</th></tr></thead><tbody>${rows
-    .map(([name, addr]) => `<tr><td>${esc(name)}</td><td><span class="addr" data-copy="${esc(addr)}">${esc(addr)}</span></td></tr>`)
+  $('#contracts').innerHTML = `<thead><tr><th>${tr('network.contracts.contract')}</th><th>${tr('common.address')}</th>
+      <th>${tr('network.contracts.status')}</th></tr></thead><tbody>${rows
+    .map(([name, addr]) => `<tr><td>${esc(name)}</td><td><span class="addr" data-copy="${esc(addr)}">${esc(addr)}</span></td>
+      <td>${tokenStatusHtml(addr)}</td></tr>`)
     .join('')}</tbody>`;
+}
+
+/** Whether the token at `addr` is paused, from the last balances snapshot; "–" for other contracts. */
+function tokenStatusHtml(addr) {
+  const t = state.snapshot?.tokens.find((x) => x.address?.toLowerCase() === addr?.toLowerCase());
+  if (!t) return '<span class="muted">–</span>';
+  return t.paused
+    ? `<span class="status paused" title="${esc(pausedHint(t))}">${PAUSE_ICON}${tr('token.paused')}</span>`
+    : `<span class="status success">${tr('token.active')}</span>`;
+}
+
+// ------------------------------------------------------------------ paused tokens
+
+/** Pause sign (two bars), drawn in currentColor, for paused tokens next to their symbol. */
+const PAUSE_ICON = '<svg class="pause-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1"/><rect x="9" y="3" width="3" height="10" rx="1"/></svg>';
+
+const pausedHint = (t) => tr('token.paused-hint', { token: t.symbol });
+const isPaused = (symbol) => !!state.snapshot?.tokens.find((t) => t.symbol === symbol)?.paused;
+
+/** The line above the balances while any token is paused, so it shows even when no row has that token. */
+function renderPausedNote(snap) {
+  const paused = (snap?.tokens || []).filter((t) => t.paused);
+  const note = $('#paused-note');
+  note.classList.toggle('hidden', !paused.length);
+  note.innerHTML = paused.length
+    ? `${PAUSE_ICON}<span><b>${esc(tr('token.paused-note', { tokens: paused.map((t) => t.symbol).join(', ') }))}</b>
+        <span class="muted">${tr('token.paused-note-hint')}</span></span>`
+    : '';
 }
 
 async function refreshBalances() {
@@ -266,6 +296,12 @@ async function refreshBalances() {
       !== JSON.stringify(state.snapshot?.wallets.map((w) => [w.wallet.address, w.roles]));
     state.snapshot = snap;
     if (rolesChanged) renderAccounts();
+    const pausedKey = snap.tokens.filter((t) => t.paused).map((t) => t.symbol).join();
+    if (pausedKey !== state.pausedKey) {
+      state.pausedKey = pausedKey;
+      renderContracts();
+      renderOperationForm();
+    }
   } catch (e) {
     if (e.status === 404) { state.deployment = null; $('#no-deployment').classList.remove('hidden'); }
   } finally {
@@ -318,7 +354,15 @@ function notEnabledFlag(w, symbol) {
 }
 
 const NO_HOLDING = { balance: 0, frozen: 0 };
-const tokenTag = (t) => ` <span class="token-tag" title="${esc(t.name)}">${esc(t.symbol)}</span>`;
+/** A token's chip; a paused token's is muted, dashed and starts with a pause sign. */
+const tokenTag = (t) => (t.paused
+  ? ` <span class="token-tag paused" title="${esc(`${t.name}: ${pausedHint(t)}`)}">${PAUSE_ICON}${esc(t.symbol)}</span>`
+  : ` <span class="token-tag" title="${esc(t.name)}">${esc(t.symbol)}</span>`);
+
+/** The Real Digital column header, which has no chip: it carries the pause badge itself. */
+const rdTh = (rd) => (rd?.paused
+  ? `<th class="num" title="${esc(`${rd.name}: ${pausedHint(rd)}`)}"><span class="paused-badge">${PAUSE_ICON}${tr('token.paused')}</span> RD (BRL)</th>`
+  : `<th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th>`);
 
 const INSTITUTION_ROLES = ['bcb', 'participant', 'reserve'];
 
@@ -338,6 +382,7 @@ try {
 } catch (_) { /* storage unavailable */ }
 
 function renderBalances(snap = state.snapshot, prev = null) {
+  renderPausedNote(snap);
   $('#balances-split').classList.toggle('hidden', balancesView !== 'split');
   $('#balances-unified-wrap').classList.toggle('hidden', balancesView !== 'unified');
   document.querySelectorAll('#balances-view [data-view]').forEach((b) => {
@@ -426,7 +471,7 @@ function renderUnifiedBalances(snap, prev) {
         <td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
     }).join('');
   table.innerHTML = `<thead><tr><th>${tr('balances.wallet')}</th>${bankTh()}<th>${tr('common.signs-with')}</th><th>${tr('common.address')}</th>
-      <th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th><th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
+      ${rdTh(rd)}<th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
     <tbody>${rows || `<tr class="empty-row"><td colspan="6">${tr('balances.empty')}</td></tr>`}</tbody>
     <tfoot><tr><td colspan="4">${tr('balances.sum')}</td><td class="num">${money(rdSum)}</td><td class="num rt">${perTokenHtml(rts, rtSums)}</td></tr>
     <tr class="supply"><td colspan="4">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td>
@@ -467,7 +512,7 @@ function renderSplitBalances(snap, prev) {
       return `<tr>${walletCells(w)}<td class="num ${changed(w, 'BRL') ? 'flash' : ''}">${amountHtml(h, '', notEnabledFlag(w, 'BRL'))}</td></tr>`;
     }).join('');
   participants.innerHTML = `<thead><tr><th>${tr('balances.participant')}</th><th>${tr('common.signs-with')}</th>
-      <th>${tr('common.address')}</th><th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th></tr></thead>
+      <th>${tr('common.address')}</th>${rdTh(rd)}</tr></thead>
     <tbody>${participantRows || `<tr class="empty-row"><td colspan="4">${tr('balances.participants.empty')}</td></tr>`}</tbody>
     <tfoot><tr><td colspan="3">${tr('balances.participants.sum')}</td><td class="num">${money(rdSum)}</td></tr>
     <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td></tr></tfoot>`;
@@ -584,6 +629,7 @@ function setWallet(form, name, value) {
 }
 
 $('#op-form').addEventListener('change', (e) => {
+  updatePauseWarning();
   const name = e.target.dataset?.wallet;
   if (name) {
     setWallet(e.currentTarget, name, e.target.value);
@@ -599,6 +645,42 @@ $('#op-select').addEventListener('change', () => {
 function tokenSymbols(includeRd) {
   const rts = (state.deployment?.realTokenizados || []).map((t) => t.symbol);
   return includeRd ? ['BRL', ...rts] : rts;
+}
+
+/** Options of a token field: paused tokens say so; Pause offers only active tokens and Resume only paused ones. */
+function tokenOptionsHtml(op, f) {
+  let symbols = tokenSymbols(f.type === 'token');
+  if (op.id === 'pause') symbols = symbols.filter((s) => !isPaused(s));
+  if (op.id === 'unpause') symbols = symbols.filter(isPaused);
+  if (!symbols.length) {
+    return `<option value="" disabled selected>${tr(op.id === 'pause' ? 'op.no-active-token' : 'op.no-paused-token')}</option>`;
+  }
+  return symbols.map((s) => `<option value="${esc(s)}">${esc(s)}${isPaused(s) && op.id !== 'unpause'
+    ? ` (${tr('token.paused-option')})` : ''}</option>`).join('');
+}
+
+/**
+ * Tokens each operation moves, so it reverts while any of them is paused. "@field" is the token chosen in
+ * that field. A swap burns the payer's Real Tokenizado, moves Real Digital between the reserves and mints
+ * the receiver's. Onboarding and enabling wallets are not blocked by a pause.
+ */
+const PAUSE_BLOCKS = {
+  'str-mint': ['BRL'], 'str-burn': ['BRL'], 'rd-transfer': ['BRL'],
+  deposit: ['@token'], withdraw: ['@token'], 'rt-transfer': ['@token'],
+  swap: ['@fromToken', '@toToken', 'BRL'],
+  freeze: ['@token'], unfreeze: ['@token'], 'forced-transfer': ['@token'],
+};
+
+/** Warns, before sending, that the operation will revert because a token it moves is paused. */
+function updatePauseWarning() {
+  const warn = $('#op-pause-warning');
+  if (!warn) return;
+  const form = $('#op-form');
+  const involved = (PAUSE_BLOCKS[$('#op-select').value] || [])
+    .map((x) => (x.startsWith('@') ? form.elements[x.slice(1)]?.value : x)).filter(Boolean);
+  const paused = [...new Set(involved.filter(isPaused))];
+  warn.classList.toggle('hidden', !paused.length);
+  warn.innerHTML = paused.length ? `${PAUSE_ICON}<span>${esc(tr('op.paused-warning', { tokens: paused.join(', ') }))}</span>` : '';
 }
 
 function renderOperationForm() {
@@ -624,8 +706,7 @@ function renderOperationForm() {
         break;
       case 'token':
       case 'rt':
-        input = `<select name="${f.name}" required>${tokenSymbols(f.type === 'token')
-          .map((s) => `<option>${esc(s)}</option>`).join('')}</select>`;
+        input = `<select name="${f.name}" required>${tokenOptionsHtml(op, f)}</select>`;
         break;
       case 'amount':
         input = `<input name="${f.name}" required inputmode="decimal" placeholder="1.000,00">`;
@@ -643,7 +724,8 @@ function renderOperationForm() {
     .map((n) => `<option value="${esc(n.name)}" ${n.primary ? 'selected' : ''} ${n.reachable === false ? 'disabled' : ''}>${esc(n.name)} · ${esc(n.url.replace(/^https?:\/\//, ''))}${n.primary ? ` (${tr('common.primary')})` : ''}${n.reachable === false ? ` – ${tr('status.down')}` : ''}</option>`).join('');
   const nodeField = `<label class="field"><span>${tr('op.send-to-node')}</span><select name="node">${nodeOptions}</select></label>`;
 
-  form.innerHTML = `${fields}${nodeField}<button class="primary" type="submit">${tr('op.submit')}</button>`;
+  form.innerHTML = `${fields}${nodeField}<div class="op-warning hidden" id="op-pause-warning" role="status"></div>
+    <button class="primary" type="submit">${tr('op.submit')}</button>`;
   for (const [k, v] of Object.entries(previous)) {
     const wallet = form.querySelector(`select[data-wallet="${k}"]`);
     if (wallet) setWallet(form, k, v);
@@ -666,6 +748,7 @@ function renderOperationForm() {
     const other = tokenSymbols(false).find((s) => s !== form.elements.fromToken.value);
     if (other) form.elements.toToken.value = other;
   }
+  updatePauseWarning();
 }
 
 $('#op-form').addEventListener('submit', async (e) => {
