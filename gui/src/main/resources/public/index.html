@@ -161,12 +161,15 @@
           <p data-i18n="eval.bench.description"></p>
           <div class="chips" id="bench-dsas"></div>
           <div class="inline-fields">
-            <label class="field"><span data-i18n="eval.bench.rates"></span><input id="bench-rates" value="25,50,100"></label>
-            <label class="field"><span data-i18n="eval.bench.seconds"></span><input id="bench-seconds" type="number" min="5" value="20"></label>
+            <label class="field"><span class="field-label"><span data-i18n="eval.bench.rates"></span><span class="info" tabindex="0"
+              role="img" title="" data-i18n-title="eval.bench.rates-hint" aria-label="" data-i18n-aria-label="eval.bench.rates-hint"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path d="M8 7v4.5M8 4.6v.1"/></svg></span></span><input id="bench-rates" value="25,50,100"></label>
+            <label class="field"><span class="field-label"><span data-i18n="eval.bench.seconds"></span><span class="info" tabindex="0"
+              role="img" title="" data-i18n-title="eval.bench.seconds-hint" aria-label="" data-i18n-aria-label="eval.bench.seconds-hint"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path d="M8 7v4.5M8 4.6v.1"/></svg></span></span><input id="bench-seconds" type="number" min="5" value="20"></label>
             <label class="field"><span data-i18n="eval.bench.clients"></span><input id="bench-clients" type="number" min="2" value="20"></label>
           </div>
           <label class="field"><span data-i18n="eval.bench.nodes"></span>
-            <input id="bench-nodes" placeholder="http://localhost:8545,http://localhost:8546"></label>
+            <input id="bench-nodes" list="bench-nodes-list" autocomplete="off" placeholder="http://localhost:8545,http://localhost:8546"></label>
+          <datalist id="bench-nodes-list"></datalist>
           <button class="primary" data-job="bench" data-i18n="eval.bench.run"></button>
         </div>
       </div>

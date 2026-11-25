@@ -170,10 +170,24 @@ async function loadNodes() {
     if (changed) {
       renderOperationForm();
       $('#bench-nodes').placeholder = nodes.map((n) => n.url).join(',') || 'http://localhost:8545,http://localhost:8546';
+      renderBenchNodesList();
     }
   } catch (e) {
     $('#nodes').innerHTML = `<tbody><tr class="empty-row"><td>${tr('network.nodes.error', { error: esc(e.message) })}</td></tr></tbody>`;
   }
+}
+
+/**
+ * Suggestions for the load test's nodes field, offered only when the user opens them: every known node at
+ * once (what the placeholder shows), then each node alone.
+ */
+function renderBenchNodesList() {
+  const urls = state.nodes.map((n) => n.url);
+  const options = urls.length > 1
+    ? [`<option value="${esc(urls.join(','))}" label="${esc(tr('eval.bench.nodes-all', { n: urls.length }))}"></option>`]
+    : [];
+  state.nodes.forEach((n) => options.push(`<option value="${esc(n.url)}" label="${esc(n.name)}"></option>`));
+  $('#bench-nodes-list').innerHTML = options.join('');
 }
 
 function renderNodes() {
