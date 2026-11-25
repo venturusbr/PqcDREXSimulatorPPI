@@ -375,10 +375,28 @@ function rtCellHtml(w, rts) {
     : amountHtml(NO_HOLDING, ' <span class="token-tag none">–</span>');
 }
 
-const walletCellsHtml = (w) => `
+/**
+ * The Bank cell: the participants whose Real Tokenizado the wallet is a client of (enabled in), or, for a
+ * reserve wallet, whose reserve it is, each tagged with its token. From the chain, not from the wallet's name.
+ */
+function bankCellHtml(w, rts) {
+  const r = w.roles || {};
+  const symbols = [...(r.clientOf || []), ...(r.reserveOf || [])];
+  if (!symbols.length) return '<span class="muted">–</span>';
+  return symbols.map((symbol) => {
+    const t = rts.find((x) => x.symbol === symbol);
+    return `<div class="rt-line"><span title="${esc(t?.name || '')}">${esc(t?.issuer || symbol)}</span>${t ? tokenTag(t) : ''}</div>`;
+  }).join('');
+}
+
+/** Name, [Bank,] signing and address cells of a balances row; the Bank cell when `rts` is given. */
+const walletCellsHtml = (w, rts) => `
       <td><span class="wallet-name"><span class="roles">${roleIcons(w)}</span>${esc(w.wallet.label)}</span></td>
+      ${rts ? `<td class="bank">${bankCellHtml(w, rts)}</td>` : ''}
       <td>${badge(w.wallet.signing)}</td>
       <td><span class="addr" data-copy="${esc(w.wallet.address)}">${esc(shortAddr(w.wallet.address))}</span></td>`;
+
+const bankTh = () => `<th title="${esc(tr('balances.bank-hint'))}">${tr('balances.bank')}</th>`;
 
 const perTokenHtml = (rts, values) => rts.map((t) => `<div class="rt-line">${money(values[t.symbol] || 0)}${tokenTag(t)}</div>`).join('')
   || money(0);
@@ -403,15 +421,15 @@ function renderUnifiedBalances(snap, prev) {
       const h = w.holdings.BRL || NO_HOLDING;
       rdSum += Number(h.balance);
       rts.filter((t) => holdsToken(w, t.symbol)).forEach((t) => { rtSums[t.symbol] += Number(w.holdings[t.symbol].balance); });
-      return `<tr>${walletCellsHtml(w)}
+      return `<tr>${walletCellsHtml(w, rts)}
         <td class="num ${changed(w, 'BRL') ? 'flash' : ''}">${amountHtml(h, '', notEnabledFlag(w, 'BRL'))}</td>
         <td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
     }).join('');
-  table.innerHTML = `<thead><tr><th>${tr('balances.wallet')}</th><th>${tr('common.signs-with')}</th><th>${tr('common.address')}</th>
+  table.innerHTML = `<thead><tr><th>${tr('balances.wallet')}</th>${bankTh()}<th>${tr('common.signs-with')}</th><th>${tr('common.address')}</th>
       <th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th><th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
-    <tbody>${rows || `<tr class="empty-row"><td colspan="5">${tr('balances.empty')}</td></tr>`}</tbody>
-    <tfoot><tr><td colspan="3">${tr('balances.sum')}</td><td class="num">${money(rdSum)}</td><td class="num rt">${perTokenHtml(rts, rtSums)}</td></tr>
-    <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td>
+    <tbody>${rows || `<tr class="empty-row"><td colspan="6">${tr('balances.empty')}</td></tr>`}</tbody>
+    <tfoot><tr><td colspan="4">${tr('balances.sum')}</td><td class="num">${money(rdSum)}</td><td class="num rt">${perTokenHtml(rts, rtSums)}</td></tr>
+    <tr class="supply"><td colspan="4">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td>
       <td class="num rt">${perTokenHtml(rts, snap.totalSupply)}</td></tr></tfoot>`;
   $('#balances-meta').textContent = tr('common.block-number', { n: snap.blockNumber });
 }
@@ -460,14 +478,14 @@ function renderSplitBalances(snap, prev) {
     .filter((w) => !hideEmpty || holdsRt(w))
     .map((w) => {
       rts.filter((t) => holds(w, t.symbol)).forEach((t) => { rtSums[t.symbol] += Number(w.holdings[t.symbol].balance); });
-      return `<tr>${walletCells(w)}<td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
+      return `<tr>${walletCells(w, rts)}<td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
     }).join('');
   const perToken = (values) => perTokenHtml(rts, values);
-  clients.innerHTML = `<thead><tr><th>${tr('balances.client')}</th><th>${tr('common.signs-with')}</th>
+  clients.innerHTML = `<thead><tr><th>${tr('balances.client')}</th>${bankTh()}<th>${tr('common.signs-with')}</th>
       <th>${tr('common.address')}</th><th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
-    <tbody>${clientRows || `<tr class="empty-row"><td colspan="4">${tr('balances.clients.empty')}</td></tr>`}</tbody>
-    <tfoot><tr><td colspan="3">${tr('balances.clients.sum')}</td><td class="num rt">${perToken(rtSums)}</td></tr>
-    <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num rt">${perToken(snap.totalSupply)}</td></tr></tfoot>`;
+    <tbody>${clientRows || `<tr class="empty-row"><td colspan="5">${tr('balances.clients.empty')}</td></tr>`}</tbody>
+    <tfoot><tr><td colspan="4">${tr('balances.clients.sum')}</td><td class="num rt">${perToken(rtSums)}</td></tr>
+    <tr class="supply"><td colspan="4">${tr('balances.total-supply')}</td><td class="num rt">${perToken(snap.totalSupply)}</td></tr></tfoot>`;
 
   // Accounts in neither table: never enabled anywhere and holding nothing.
   const unlisted = hideEmpty ? [] : snap.wallets.filter((w) => !isParticipant(w) && !isClient(w));

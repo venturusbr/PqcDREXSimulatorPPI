@@ -79,4 +79,10 @@ if [ -n "$BLOCK_PERIOD" ]; then
 fi
 
 cd "$WORK_DIR"
-exec ./init-qbft.sh "$IMAGE" --node-dsa="$NODE_DSA"
+# Newer besu-qbft sets accounts-supported-dsas itself from --accounts-dsas (SECP256K1 when it is not
+# given), which would undo the patch above, so pass the same list there too.
+ACCOUNTS_ARG=()
+if grep -q -- '--accounts-dsas' init-qbft.sh; then
+    ACCOUNTS_ARG=(--accounts-dsas="$(echo "$ACCOUNT_DSAS" | tr -d '[]" ')")
+fi
+exec ./init-qbft.sh "$IMAGE" --node-dsa="$NODE_DSA" "${ACCOUNTS_ARG[@]}"

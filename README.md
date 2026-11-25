@@ -40,7 +40,7 @@ java -jar core/target/drexsim.jar setup-demo
 java -jar core/target/drexsim.jar balances --watch 2
 ```
 
-`setup-demo` creates BCB, two banks with their reserves and Real Tokenizado (BRLA, BRLB) and three clients, each actor signing with a different DSA (`MLDSA44`, `MLDSA87`, `FALCON512`, both hybrids, and standard ECDSA for one bank as the classical baseline). It then mints Real Digital through STR, deposits client funds, freezes part of a balance, and runs payments in which every client signs: two inter-bank swaps and one transfer inside Banco A. Every transaction is printed with its type, signature and key sizes and gas limit.
+`setup-demo` creates BCB, two banks with their reserves and Real Tokenizado (BRLA, BRLB) and six clients, the actors signing with different DSAs (`MLDSA44`, `MLDSA65`, `MLDSA87`, `FALCON512`, both hybrids, and standard ECDSA for one bank as the classical baseline). It then mints Real Digital through STR, deposits client funds, freezes part of a balance, and runs payments: two inter-bank swaps and two transfers inside Banco A. Three clients show edge cases of the balance viewer: daniel is a client of both banks, Banco B disables fabio after a deposit (his balance stays), and eva is never onboarded but receives Real Tokenizado, since `transfer()` checks only the sender. Every transaction is printed with its type, signature and key sizes and gas limit.
 
 Other commands: `accounts list`, `accounts new <name> --dsa <DSA> [--standard]`, `deploy`, and the evaluation commands `flows`, `security` and `bench` (below). Run `java -jar core/target/drexsim.jar <command> --help` for details. Accounts and contract addresses are kept in `simulator-data/` (`--data-dir`); the keys there are **test keys in plain text**.
 
@@ -76,12 +76,15 @@ bank-a                | MLDSA44             | 0x8c86a7..048f |    50.000,00 |   
 reserve-a             | SECP256K1-FALCON512 | 0xc256cb..4b2b |   998.865,44 |                     0,00 |     0,00
 bank-b                | SECP256K1 (std)     | 0xc5f1c4..9321 |         0,00 |                     0,00 |     0,00
 reserve-b             | SECP256K1 (std)     | 0x86f3b8..e825 | 1.001.134,56 |                     0,00 |     0,00
-client-a1             | SECP256K1-MLDSA44   | 0x0719c2..36fa |         0,00 |                 9.165,44 |     0,00
-client-a2             | MLDSA87             | 0xd9da58..7f5a |         0,00 | 2.200,00 (frozen 500,00) |     0,00
-client-b1             | FALCON512           | 0xaa9d5e..de88 |         0,00 |                     0,00 | 8.134,56
+ana                   | SECP256K1-MLDSA44   | 0x0719c2..36fa |         0,00 |                 9.165,44 |     0,00
+bruno                 | MLDSA87             | 0xd9da58..7f5a |         0,00 | 2.200,00 (frozen 500,00) |     0,00
+carla                 | FALCON512           | 0xaa9d5e..de88 |         0,00 |                     0,00 | 8.134,56
+daniel                | MLDSA65             | 0xf7886e..0677 |         0,00 |                   800,00 | 1.000,00
+eva                   | SECP256K1 (std)     | 0xd64e4c..2334 |         0,00 |                   200,00 |     0,00
+fabio                 | FALCON512           | 0xd54884..5acb |         0,00 |                     0,00 |   800,00
 ----------------------+---------------------+----------------+--------------+--------------------------+---------
-Sum of wallets shown  |                     |                | 2.050.000,00 |                11.365,44 | 8.134,56
-Total supply on chain |                     |                | 2.050.000,00 |                11.365,44 | 8.134,56
+Sum of wallets shown  |                     |                | 2.050.000,00 |                12.365,44 | 9.934,56
+Total supply on chain |                     |                | 2.050.000,00 |                12.365,44 | 9.934,56
 ```
 
 Options: `--account <name>` (repeatable), `--address <0x..>` for wallets created elsewhere, `--hide-empty`, `--watch <seconds>`, and `--json` for the raw snapshot (amounts in cents, with `balance`, `frozen` and `available`). The same data comes from `BalanceService` for other front-ends.

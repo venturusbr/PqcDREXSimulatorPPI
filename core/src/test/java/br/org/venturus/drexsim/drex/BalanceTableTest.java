@@ -41,7 +41,7 @@ class BalanceTableTest {
         tokens,
         List.of(
             new WalletBalances(new Wallet("reserve-a", "0x1234567890abcdef1234567890abcdef12345678", "SECP256K1-FALCON512"), reserve),
-            new WalletBalances(new Wallet("client-a2", "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", "MLDSA87"), client),
+            new WalletBalances(new Wallet("bruno", "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", "MLDSA87"), client),
             new WalletBalances(new Wallet("idle", "0x0000000000000000000000000000000000000001", "SECP256K1"), empty)),
         Map.of("BRL", c(200_000_000), "BRLA", c(250_000)));
   }
