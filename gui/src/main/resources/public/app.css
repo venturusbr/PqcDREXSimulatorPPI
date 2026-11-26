@@ -304,6 +304,14 @@ td.flash { animation: flash 1.6s ease-out; }
 .status.stopping, .status.stopped { color: var(--muted); background: var(--surface-2); }
 button.stop { color: var(--err); border-color: var(--err); }
 button.stop:hover:not(:disabled) { color: var(--accent-text); background: var(--err); border-color: var(--err); }
+/* While a stop is under way: a spinner before the label, and less faded than other disabled buttons. */
+button.stop.stopping { display: inline-flex; align-items: center; gap: 6px; opacity: 0.85; }
+button.stop.stopping::before {
+  content: ""; width: 0.9em; height: 0.9em; box-sizing: border-box; border-radius: 50%;
+  border: 2px solid currentColor; border-right-color: transparent; animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { button.stop.stopping::before { animation-duration: 2.4s; } }
 .field-caption { display: block; font-size: 12.5px; color: var(--muted); font-weight: 550; margin-bottom: 6px; }
 .bench-plan { font-size: 13px; color: var(--muted); margin: 0 0 12px; }
 .hash { font-family: var(--mono); font-size: 12px; cursor: copy; }

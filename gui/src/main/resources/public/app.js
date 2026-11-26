@@ -1240,7 +1240,11 @@ function renderJobDetail() {
   $('#job-status').textContent = statusLabel(job.status) + (job.error && job.status !== 'stopped' ? `: ${job.error}` : '');
   const stop = $('#btn-stop-job');
   stop.classList.toggle('hidden', !isActive(job.status));
-  stop.disabled = job.status === 'stopping';
+  const stopping = job.status === 'stopping';
+  stop.disabled = stopping;
+  stop.classList.toggle('stopping', stopping);
+  stop.setAttribute('aria-busy', String(stopping));
+  stop.textContent = tr(stopping ? 'eval.runs.stopping' : 'eval.runs.stop');
   const log = $('#job-log');
   const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
   log.textContent = (job.log || []).join('\n') || tr('app.starting');

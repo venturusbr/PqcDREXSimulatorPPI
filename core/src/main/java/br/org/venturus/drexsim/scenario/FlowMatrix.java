@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /**
@@ -51,7 +52,17 @@ public final class FlowMatrix {
         results.put(e.getKey(), e.getValue().get());
       }
     } finally {
+      // Stopped or failed: interrupt the other profiles' flows and wait for them, so nothing still runs
+      // (and logs) once this returns.
       pool.shutdownNow();
+      boolean interrupted = Thread.interrupted();
+      try {
+        pool.awaitTermination(60, TimeUnit.SECONDS);
+      } finally {
+        if (interrupted) {
+          Thread.currentThread().interrupt();
+        }
+      }
     }
     return new FlowMatrix(results, started, System.currentTimeMillis() - t0, rpcUrl);
   }
