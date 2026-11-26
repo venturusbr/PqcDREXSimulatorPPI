@@ -94,16 +94,19 @@ final class SimulatorService implements AutoCloseable {
       new Operation("unpause", "Resume token", 17, "the token's authority", "Ends the emergency pause.",
           List.of(new Field("token", "Token", "token"))),
       new Operation("onboard-participant", "Onboard a participant", 1, "BCB",
-          "Enables a bank and its reserve wallet in Real Digital and records its default wallet.",
+          "Enables a bank and its reserve wallet in Real Digital and records its default wallet. A CNPJ8 whose "
+              + "default wallet is another one is refused.",
           List.of(new Field("participant", "Participant", "account"), new Field("reserve", "Reserve wallet", "account"),
               new Field("cnpj8", "CNPJ8", "number"))),
       new Operation("deploy-rt", "Deploy a participant's Real Tokenizado", 7, "the participant",
-          "The bank deploys its tokenized deposit and authorizes the swaps; BCB registers it.",
+          "The bank deploys its tokenized deposit and authorizes the swaps; BCB registers it. A symbol or CNPJ8 that "
+              + "already has a token is refused; the same values again finish a setup that stopped halfway.",
           List.of(new Field("participant", "Participant", "account"), new Field("reserve", "Reserve wallet", "account"),
               new Field("name", "Participant name", "text"), new Field("symbol", "Symbol", "text"),
               new Field("cnpj8", "CNPJ8", "number"))),
       new Operation("onboard-client", "Onboard a client", 8, "the bank of the token",
-          "Enables the client in the bank's Real Tokenizado and registers its key (CPF) in KeyDictionary.",
+          "Enables the client in the bank's Real Tokenizado and registers its key (CPF) in KeyDictionary. A CPF "
+              + "registered to another wallet is refused; a client whose CPF is already its key is only enabled.",
           List.of(new Field("token", "Real Tokenizado", "rt"), new Field("client", "Client", "account"), new Field("cpf", "CPF", "number"))),
       new Operation("enable-wallet", "Enable a wallet in Real Digital", 2, "an enabled participant",
           "A participant enables another wallet through RealDigitalEnableAccount.",
@@ -423,18 +426,22 @@ final class SimulatorService implements AutoCloseable {
         }
         case "onboard-participant" -> {
           signer = bcb();
-          drex.onboardParticipant(signer, account(p, "participant"), account(p, "reserve"), number(p, "cnpj8"));
+          drex.onboardParticipant(signer, account(p, "participant"), account(p, "reserve"), number(p, "cnpj8"))
+              .forEach(r -> hashes.add(r.getTransactionHash()));
         }
         case "deploy-rt" -> {
           signer = account(p, "participant");
-          drex.deployRealTokenizado(bcb(), signer, account(p, "reserve"), required(p, "name"), required(p, "symbol"),
-              number(p, "cnpj8"));
-          deployment.save(dataDir);
+          try {
+            drex.deployRealTokenizado(bcb(), signer, account(p, "reserve"), required(p, "name"), required(p, "symbol"),
+                number(p, "cnpj8")).receipts().forEach(r -> hashes.add(r.getTransactionHash()));
+          } finally {
+            deployment.save(dataDir); // also a token whose setup failed halfway, so it can be finished
+          }
         }
         case "onboard-client" -> {
           signer = tokenAuthority(p.get("token"));
           drex.onboardClient(signer, p.get("token"), account(p, "client"), number(p, "cpf"), BigInteger.ONE,
-              BigInteger.ONE, BigInteger.ONE);
+              BigInteger.ONE, BigInteger.ONE).forEach(r -> hashes.add(r.getTransactionHash()));
         }
         case "enable-wallet" -> {
           signer = account(p, "participant");
@@ -449,7 +456,8 @@ final class SimulatorService implements AutoCloseable {
       events.send("balances-changed", Map.of("operation", op));
       return new OpResult(op, true, spec.label() + " done", signer == null ? null : signer.name(), node.name(), hashes);
     } catch (Exception e) {
-      return new OpResult(op, false, rootMessage(e), signer == null ? null : signer.name(), node.name(), hashes);
+      return new OpResult(op, false, withNames(rootMessage(e)), signer == null ? null : signer.name(), node.name(),
+          hashes);
     } finally {
       currentOperation.remove();
     }
@@ -590,6 +598,14 @@ final class SimulatorService implements AutoCloseable {
 
   private Path reportDir(String kind) {
     return reportsDir.resolve("gui-" + kind + "-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")));
+  }
+
+  private static final java.util.regex.Pattern ADDRESS = java.util.regex.Pattern.compile("0x[0-9a-fA-F]{40}(?![0-9a-fA-F])");
+
+  /** {@code message} with the addresses of known accounts followed by their names. */
+  String withNames(String message) {
+    return ADDRESS.matcher(message).replaceAll(m -> java.util.regex.Matcher.quoteReplacement(
+        store.byAddress(m.group()).map(a -> m.group() + " (" + a.name() + ")").orElse(m.group())));
   }
 
   private static final java.util.regex.Pattern REVERT =

@@ -166,6 +166,11 @@ public final class FlowSuite {
     expect(rd(bcb).verifyAccount(bankA.address()).send(), "bank A enabled");
     expect(rd(bcb).verifyAccount(reserveB.address()).send(), "reserve B enabled");
     expectEquals(bankA.address(), defaultAccount(bcb).defaultAccount(CNPJ_A).send(), "default wallet of bank A");
+    // Issue #18: addDefaultAccount would replace bank A's default wallet, so the simulator refuses before sending.
+    expectRefused("bank B onboarded with bank A's CNPJ8", () -> drex.onboardParticipant(bcb, bankB, reserveB, CNPJ_A));
+    expectRefused("bank A onboarded again", () -> drex.onboardParticipant(bcb, bankA, reserveA, CNPJ_A));
+    expectEquals(bankA.address(), defaultAccount(bcb).defaultAccount(CNPJ_A).send(),
+        "default wallet of bank A after the refused onboardings");
   }
 
   private void flow2EnableDisableOwnWallets() throws Exception {
@@ -210,6 +215,18 @@ public final class FlowSuite {
     expectEquals(CNPJ_A, rt("BRLA", bcb).cnpj8().send(), "BRLA cnpj8");
     expectEquals(reserveB.address(), rt("BRLB", bcb).reserve().send(), "BRLB reserve");
     expect(rt("BRLB", bcb).hasRole(DrexClient.MINTER_ROLE, d.swapOneStep).send(), "SwapOneStep mints BRLB");
+    // Issue #17: a symbol or CNPJ8 that already has a token is refused, so the existing token stays.
+    String brla = d.tokenized("BRLA").orElseThrow().address();
+    expectRefused("another token with symbol brla", () ->
+        drex.deployRealTokenizado(bcb, bankB, reserveB, "Banco B", "brla", new BigInteger("33333333")));
+    expectRefused("another token for bank A's CNPJ8", () ->
+        drex.deployRealTokenizado(bcb, bankB, reserveB, "Banco B", "BRLC", CNPJ_A));
+    expectRefused("BRLA again, already set up", () -> drex.deployRealTokenizado(bcb, bankA, reserveA, "Banco A", "BRLA", CNPJ_A));
+    expectRefused("BRLA again with another reserve", () -> drex.deployRealTokenizado(bcb, bankA, bankA, "Banco A", "BRLA", CNPJ_A));
+    expectEquals(brla, d.tokenized("BRLA").orElseThrow().address(), "BRLA after the refused deploys");
+    expectEquals(brla, AddressDiscovery.load(d.addressDiscovery, chain.web3j(), chain.readOnly(), chain.gasProvider())
+        .addressDiscovery(Hash.sha3(("RealTokenizado@" + CNPJ_A).getBytes())).send(), "AddressDiscovery entry of bank A");
+    expectEquals(2, d.realTokenizados.size(), "Real Tokenizados");
   }
 
   private void flow8OnboardClients() throws Exception {
@@ -220,6 +237,16 @@ public final class FlowSuite {
     KeyDictionary.CustomerData data = keyDictionary(bcb).getCustomerData(DrexClient.clientKey(CPF_X)).send();
     expectEquals(CPF_X, data.taxId, "client X CPF");
     expectEquals(bankA.address(), data.owner, "client X key owner");
+    // Issue #16: KeyDictionary.addAccount would overwrite these keys, so the simulator refuses before sending.
+    expectRefused("bank B onboarding client X's CPF for another wallet", () ->
+        drex.onboardClient(bankB, "BRLB", clientY, CPF_X, BigInteger.TWO, BigInteger.valueOf(202), BigInteger.ONE));
+    expectRefused("client X onboarded again under another CPF", () ->
+        drex.onboardClient(bankA, "BRLA", clientX, new BigInteger("99999999999"), BigInteger.ONE, BigInteger.valueOf(103),
+            BigInteger.ONE));
+    expectRefused("client X onboarded again at its bank", () ->
+        drex.onboardClient(bankA, "BRLA", clientX, CPF_X, BigInteger.ONE, BigInteger.valueOf(101), BigInteger.ONE));
+    expectEquals(clientX.address(), keyDictionary(bcb).getWallet(DrexClient.clientKey(CPF_X)).send(),
+        "client X key after the refused onboardings");
   }
 
   private void flow9Deposits() throws Exception {
