@@ -96,12 +96,18 @@ public final class FlowSuite {
       createActors();
       boolean foundationFailed = false;
       for (int flow = 0; flow < FLOW_NAMES.size(); flow++) {
+        if (Thread.currentThread().isInterrupted()) {
+          throw new InterruptedException("Flows stopped");
+        }
         if (foundationFailed) {
           results.add(new FlowResult(profile.label(), flow, FLOW_NAMES.get(flow), Status.SKIPPED,
               "a setup flow failed", List.of(), 0));
           continue;
         }
         FlowResult result = runFlow(flow);
+        if (Thread.currentThread().isInterrupted()) {
+          throw new InterruptedException("Flows stopped"); // the flow failed because it was stopped
+        }
         results.add(result);
         log.accept(String.format("[%s] flow %2d %-32s %s %s", profile.label(), flow, FLOW_NAMES.get(flow),
             result.status(), result.detail() == null ? "" : result.detail()));
@@ -142,11 +148,28 @@ public final class FlowSuite {
         default -> throw new IllegalArgumentException("No flow " + flow);
       }
     } catch (Exception | AssertionError e) {
+      if (isInterrupt(e)) {
+        Thread.currentThread().interrupt(); // stopped, not failed: run() ends at once
+      }
       status = Status.FAIL;
       detail = rootMessage(e);
     }
     long millis = System.currentTimeMillis() - t0;
     return new FlowResult(profile.label(), flow, FLOW_NAMES.get(flow), status, detail, receipts(), millis);
+  }
+
+  /**
+   * Whether {@code e} comes from the thread being interrupted (whose flag a catch may have cleared). A
+   * read timeout is an {@link java.io.InterruptedIOException} too, but a failure, not a stop.
+   */
+  static boolean isInterrupt(Throwable e) {
+    for (Throwable t = e; t != null; t = t.getCause() == t ? null : t.getCause()) {
+      if (t instanceof InterruptedException || t instanceof java.nio.channels.ClosedByInterruptException
+          || (t instanceof java.io.InterruptedIOException && !(t instanceof java.net.SocketTimeoutException))) {
+        return true;
+      }
+    }
+    return Thread.currentThread().isInterrupted();
   }
 
   // ------------------------------------------------------------------ flows

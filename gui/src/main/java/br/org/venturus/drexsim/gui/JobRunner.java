@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -34,6 +35,8 @@ final class JobRunner implements AutoCloseable {
     public volatile String error;
     public volatile String report;
     public final List<String> log = Collections.synchronizedList(new ArrayList<>());
+    private volatile Thread worker;
+    private volatile boolean stopRequested;
 
     Job(long id, String kind, String title) {
       this.id = id;
@@ -66,36 +69,96 @@ final class JobRunner implements AutoCloseable {
 
   /** Starts a job, or fails if one is still running (jobs share accounts and the network). */
   synchronized Job start(String kind, String title, Task task) {
-    if (current != null && "running".equals(current.status)) {
-      throw new IllegalStateException("'" + current.title + "' is still running");
+    if (current != null && current.endedAt == null) {
+      throw new IllegalStateException("'" + current.title + "' is still " + current.status);
     }
     Job job = new Job(ids.incrementAndGet(), kind, title);
     jobs.put(job.id, job);
     current = job;
     events.send("job", Summary.of(job));
     executor.submit(() -> {
+      job.worker = Thread.currentThread();
       Consumer<String> log = line -> {
+        if (job.endedAt != null) {
+          return; // a thread the task started outlived it: its lines would follow "Stopped by the user"
+        }
         job.log.add(line);
         events.send("job-log", Map.of("id", job.id, "line", line));
-      };
-      try {
-        job.report = task.run(log);
-        job.status = "done";
-      } catch (Throwable e) {
-        Throwable root = e;
-        while (root.getCause() != null && root.getCause() != root) {
-          root = root.getCause();
+        // A task that is not waiting when it is stopped ends at its next log line.
+        if (job.stopRequested && Thread.currentThread() == job.worker) {
+          throw new CancellationException(STOPPED);
         }
-        job.error = root.getMessage() == null ? root.getClass().getSimpleName() : root.getMessage();
-        job.status = "failed";
-        log.accept("FAILED: " + job.error);
-        System.err.println("Job " + job.id + " (" + job.title + ") failed:");
-        e.printStackTrace();
+      };
+      String outcome = "done";
+      try {
+        if (job.stopRequested) {
+          throw new CancellationException(STOPPED);
+        }
+        job.report = task.run(log);
+      } catch (Throwable e) {
+        if (!job.stopRequested) {
+          Throwable root = e;
+          while (root.getCause() != null && root.getCause() != root) {
+            root = root.getCause();
+          }
+          outcome = "failed";
+          job.error = root.getMessage() == null ? root.getClass().getSimpleName() : root.getMessage();
+          String line = "FAILED: " + job.error;
+          job.log.add(line);
+          events.send("job-log", Map.of("id", job.id, "line", line));
+          System.err.println("Job " + job.id + " (" + job.title + ") failed:");
+          e.printStackTrace();
+        }
       } finally {
-        job.endedAt = Instant.now();
+        // The outcome is settled here, under stop()'s lock, and nowhere else. A stop either comes before
+        // this (it has then set "stopping" and logged "Stopping..."), and the job ends stopped however its
+        // task ended, or it finds the job ended and is refused.
+        synchronized (JobRunner.this) {
+          if (job.stopRequested) {
+            job.status = "stopped";
+            job.error = STOPPED;
+            job.log.add(STOPPED);
+            events.send("job-log", Map.of("id", job.id, "line", STOPPED));
+          } else {
+            job.status = outcome;
+          }
+          job.endedAt = Instant.now();
+        }
+        Thread.interrupted(); // the executor's thread runs the next job: clear a stop's interrupt
         events.send("job", Summary.of(job));
       }
     });
+    return job;
+  }
+
+  static final String STOPPED = "Stopped by the user";
+
+  /**
+   * Asks a running job to stop: interrupts its waits (between transactions, blocks and polls) and ends it
+   * at its next log line otherwise. What it already sent stays on the chain. The job is "stopping" until
+   * its task returns, and no other job starts before that.
+   */
+  synchronized Job stop(long id) {
+    Job job = jobs.get(id);
+    if (job == null) {
+      throw new java.util.NoSuchElementException("No such job");
+    }
+    if (job.endedAt != null) {
+      throw new IllegalStateException("'" + job.title + "' is not running");
+    }
+    if (!job.stopRequested) {
+      job.stopRequested = true;
+      job.status = "stopping";
+      job.log.add("Stopping...");
+      events.send("job-log", Map.of("id", job.id, "line", "Stopping..."));
+      events.send("job", Summary.of(job));
+      // Interrupt rather than cancel the future: a cancelled task that has not started never runs, so it
+      // would never end and would block every later job. One that has not started sees stopRequested.
+      Thread worker = job.worker;
+      if (worker != null) {
+        worker.interrupt();
+      }
+    }
     return job;
   }
 

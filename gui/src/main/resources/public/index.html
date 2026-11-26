@@ -175,14 +175,24 @@
         <div class="card">
           <h2 data-i18n="eval.bench.title"></h2>
           <p data-i18n="eval.bench.description"></p>
-          <div class="chips" id="bench-dsas"></div>
+          <span class="field-caption" id="bench-dsas-label" data-i18n="eval.bench.dsas"></span>
+          <div class="chips" id="bench-dsas" role="group" aria-labelledby="bench-dsas-label" aria-describedby="bench-dsas-error"></div>
+          <small class="field-error hidden" id="bench-dsas-error" aria-live="polite"></small>
           <div class="inline-fields">
-            <label class="field"><span data-i18n="eval.bench.rates"></span><input id="bench-rates" value="25,50,100"></label>
-            <label class="field"><span data-i18n="eval.bench.seconds"></span><input id="bench-seconds" type="number" min="5" value="20"></label>
-            <label class="field"><span data-i18n="eval.bench.clients"></span><input id="bench-clients" type="number" min="2" value="20"></label>
+            <label class="field"><span class="field-label"><span data-i18n="eval.bench.rates"></span><span class="info" tabindex="0"
+              role="img" title="" data-i18n-title="eval.bench.rates-hint" aria-label="" data-i18n-aria-label="eval.bench.rates-hint"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path d="M8 7v4.5M8 4.6v.1"/></svg></span></span><input id="bench-rates" value="25,50,100"
+              inputmode="decimal" aria-describedby="bench-rates-error"><small class="field-error hidden" id="bench-rates-error" aria-live="polite"></small></label>
+            <label class="field"><span class="field-label"><span data-i18n="eval.bench.seconds"></span><span class="info" tabindex="0"
+              role="img" title="" data-i18n-title="eval.bench.seconds-hint" aria-label="" data-i18n-aria-label="eval.bench.seconds-hint"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7"/><path d="M8 7v4.5M8 4.6v.1"/></svg></span></span><input id="bench-seconds" type="number" min="5" max="3600" step="1"
+              value="20" aria-describedby="bench-seconds-error"><small class="field-error hidden" id="bench-seconds-error" aria-live="polite"></small></label>
+            <label class="field"><span data-i18n="eval.bench.clients"></span><input id="bench-clients" type="number" min="2" max="500" step="1"
+              value="20" aria-describedby="bench-clients-error"><small class="field-error hidden" id="bench-clients-error" aria-live="polite"></small></label>
           </div>
           <label class="field"><span data-i18n="eval.bench.nodes"></span>
-            <input id="bench-nodes" placeholder="http://localhost:8545,http://localhost:8546"></label>
+            <input id="bench-nodes" list="bench-nodes-list" autocomplete="off" placeholder="http://localhost:8545,http://localhost:8546"
+              aria-describedby="bench-nodes-error"><small class="field-error hidden" id="bench-nodes-error" aria-live="polite"></small></label>
+          <datalist id="bench-nodes-list"></datalist>
+          <p class="bench-plan" id="bench-plan" aria-live="polite"></p>
           <button class="primary" data-job="bench" data-i18n="eval.bench.run"></button>
         </div>
       </div>
@@ -191,7 +201,9 @@
         <div class="card-head"><h2 data-i18n="eval.runs.title"></h2><span class="muted" id="runs-note"></span></div>
         <div class="jobs" id="jobs"></div>
         <div class="job-detail hidden" id="job-detail">
-          <div class="card-head"><h3 id="job-title"></h3><span class="status" id="job-status"></span></div>
+          <div class="card-head"><h3 id="job-title"></h3>
+            <div class="card-tools"><span class="status" id="job-status"></span>
+              <button type="button" class="stop hidden" id="btn-stop-job" data-i18n="eval.runs.stop"></button></div></div>
           <pre class="console" id="job-log"></pre>
           <article class="report" id="job-report"></article>
         </div>

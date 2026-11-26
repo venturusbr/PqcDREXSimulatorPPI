@@ -66,7 +66,75 @@ public final class LoadTest {
    * @param drainSeconds time to wait after a level for its transactions to be included
    */
   public record Config(List<String> endpoints, SignerProfile profile, int clientsPerBank, List<Double> rates,
-      int secondsPerLevel, double swapShare, int drainSeconds, int submitThreads) {}
+      int secondsPerLevel, double swapShare, int drainSeconds, int submitThreads) {
+
+    /** Bounds checked here and mirrored by the GUI's load test form. */
+    public static final int MIN_CLIENTS = 2;
+    public static final int MAX_CLIENTS = 500;
+    public static final double MAX_RATE = 10_000;
+    public static final int MIN_SECONDS = 5;
+    public static final int MAX_SECONDS = 3_600;
+
+    /**
+     * Rejects a configuration that would fail only after the setup or measure nothing: a level that
+     * sends no transaction, a single client per bank (it would pay itself), malformed node URLs.
+     */
+    public Config {
+      if (endpoints == null || endpoints.isEmpty()) {
+        throw new IllegalArgumentException("No node to send the load to");
+      }
+      for (String url : endpoints) {
+        checkUrl(url);
+      }
+      if (profile == null) {
+        throw new IllegalArgumentException("No signer DSA");
+      }
+      if (clientsPerBank < MIN_CLIENTS || clientsPerBank > MAX_CLIENTS) {
+        throw new IllegalArgumentException(
+            "Clients per bank must be from " + MIN_CLIENTS + " to " + MAX_CLIENTS + ", not " + clientsPerBank);
+      }
+      if (secondsPerLevel < MIN_SECONDS || secondsPerLevel > MAX_SECONDS) {
+        throw new IllegalArgumentException(
+            "Seconds per rate must be from " + MIN_SECONDS + " to " + MAX_SECONDS + ", not " + secondsPerLevel);
+      }
+      if (rates == null || rates.isEmpty()) {
+        throw new IllegalArgumentException("No rate to test");
+      }
+      for (Double rate : rates) {
+        if (rate == null || !(rate > 0) || rate > MAX_RATE) {
+          throw new IllegalArgumentException("Each rate must be above 0 and up to " + (long) MAX_RATE + " TPS, not " + rate);
+        }
+        if (Math.round(rate * secondsPerLevel) < 1) {
+          throw new IllegalArgumentException(
+              "At " + rate + " TPS, " + secondsPerLevel + " seconds send no transaction; raise the rate or the seconds");
+        }
+      }
+      if (!(swapShare >= 0 && swapShare <= 1)) {
+        throw new IllegalArgumentException("The swap share must be from 0 to 1, not " + swapShare);
+      }
+      if (drainSeconds < 0) {
+        throw new IllegalArgumentException("The drain time cannot be negative");
+      }
+      if (submitThreads < 1) {
+        throw new IllegalArgumentException("At least one submitting thread is needed");
+      }
+      endpoints = List.copyOf(endpoints);
+      rates = List.copyOf(rates);
+    }
+
+    private static void checkUrl(String url) {
+      try {
+        java.net.URI uri = new java.net.URI(url == null ? "" : url.trim());
+        String scheme = uri.getScheme();
+        if (uri.getHost() != null && ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) {
+          return;
+        }
+      } catch (java.net.URISyntaxException e) {
+        // reported below
+      }
+      throw new IllegalArgumentException("Not an http:// or https:// node URL: " + url);
+    }
+  }
 
   private static final BigInteger CNPJ_A = BigInteger.valueOf(11111111);
   private static final BigInteger CNPJ_B = BigInteger.valueOf(22222222);
@@ -175,6 +243,9 @@ public final class LoadTest {
   private static void batch(List<Account> clients, Function<Account, CompletableFuture<TransactionReceipt>> call)
       throws InterruptedException {
     for (int from = 0; from < clients.size(); from += 20) {
+      if (Thread.currentThread().isInterrupted()) {
+        throw new InterruptedException("Load test stopped");
+      }
       List<Account> chunk = clients.subList(from, Math.min(from + 20, clients.size()));
       List<Account> todo = new ArrayList<>(chunk);
       for (int attempt = 1; !todo.isEmpty(); attempt++) {
@@ -212,13 +283,25 @@ public final class LoadTest {
   private LevelResult level(List<Web3j> nodes, double rate) throws Exception {
     BlockWatcher watcher = new BlockWatcher(chain.web3j());
     Thread watcherThread = new Thread(watcher, "block-watcher");
+    watcherThread.setDaemon(true);
     watcherThread.start();
     NodeStatsSampler stats = new NodeStatsSampler();
     Thread statsThread = new Thread(stats, "docker-stats");
     statsThread.setDaemon(true);
     statsThread.start();
-
     ExecutorService workers = Executors.newFixedThreadPool(config.submitThreads());
+    try {
+      return measure(nodes, rate, watcher, watcherThread, stats, workers);
+    } finally {
+      // Also when the run is stopped or fails: no thread of the level keeps sending or polling.
+      workers.shutdownNow();
+      watcher.stop();
+      stats.stop();
+    }
+  }
+
+  private LevelResult measure(List<Web3j> nodes, double rate, BlockWatcher watcher, Thread watcherThread,
+      NodeStatsSampler stats, ExecutorService workers) throws Exception {
     List<Pending> accepted = Collections.synchronizedList(new ArrayList<>());
     Map<String, AtomicLong> rejections = new ConcurrentHashMap<>();
     AtomicLong signNanos = new AtomicLong();
@@ -234,6 +317,9 @@ public final class LoadTest {
       long wait = due - System.nanoTime();
       if (wait > 0) {
         LockSupport.parkNanos(wait);
+      }
+      if (Thread.currentThread().isInterrupted()) {
+        throw new InterruptedException("Load test stopped");
       }
       int senderIndex = (int) (i % all.size());
       Account sender = all.get(senderIndex);
@@ -321,10 +407,13 @@ public final class LoadTest {
         : (blocks.get(blocks.size() - 1).observedMillis() - blocks.get(0).observedMillis()) / 1000.0 / (blocks.size() - 1);
     long gasLimit = blocks.isEmpty() ? 0 : blocks.get(0).gasLimit();
     double ceiling = gasPerTx == 0 || interval == 0 ? 0 : gasLimit / gasPerTx / interval;
-    // Inclusion rate over the span in which the level's blocks were produced: from the first block
-    // that included one of its transactions to the last, plus one block interval.
-    double span = included == 0 ? 1 : (lastInclusion - firstInclusion) / 1000.0 + Math.max(interval, 0.001);
-    double achieved = included / span;
+    // Inclusion rate: the level's transactions over the time from the first block that included one of
+    // them to the last, but no less than the time they took to be sent. Blocks count time in whole
+    // intervals: a level sent for 10 s over 2 s blocks lands in 5 or 6 blocks, 8 or 10 s apart, so the
+    // inclusion span alone would make it look faster than it was sent, or slower by a whole block.
+    double sendSeconds = (submitEndMillis - startMillis) / 1000.0;
+    double span = Math.max(sendSeconds, (lastInclusion - firstInclusion) / 1000.0);
+    double achieved = included == 0 || span <= 0 ? 0 : included / span;
 
     // Receipt status of a sample of included transactions.
     List<Pending> includedTxs = snapshot.stream().filter(t -> watcher.includedAt(t.hash()) != null).collect(Collectors.toList());
@@ -405,12 +494,36 @@ public final class LoadTest {
       long head = chain.blockNumber();
       while (seen < head && emptyInARow < 2) {
         seen++;
-        int txs = chain.web3j().ethGetBlockTransactionCountByNumber(DefaultBlockParameter.valueOf(BigInteger.valueOf(seen)))
-            .send().getTransactionCount().intValueExact();
+        int txs = blockTxCount(seen);
         emptyInARow = txs == 0 ? emptyInARow + 1 : 0;
       }
       Thread.sleep(500);
     }
+  }
+
+  /**
+   * Transactions in block {@code number}. A busy node can answer with an error or no result instead of
+   * the count: the call is retried, and the node's own message reported if it keeps failing.
+   */
+  private int blockTxCount(long number) throws IOException, InterruptedException {
+    String problem = null;
+    for (int attempt = 1; attempt <= 5; attempt++) {
+      try {
+        org.web3j.protocol.core.methods.response.EthGetBlockTransactionCountByNumber r = chain.web3j()
+            .ethGetBlockTransactionCountByNumber(DefaultBlockParameter.valueOf(BigInteger.valueOf(number))).send();
+        if (r.hasError()) {
+          problem = r.getError().getMessage();
+        } else if (r.getResult() == null) {
+          problem = "the node returned no result";
+        } else {
+          return r.getTransactionCount().intValueExact();
+        }
+      } catch (IOException e) {
+        problem = e.getMessage();
+      }
+      Thread.sleep(500L * attempt);
+    }
+    throw new IOException("Could not read the transaction count of block " + number + " after 5 attempts: " + problem);
   }
 
   // ------------------------------------------------------------------ batched reads
