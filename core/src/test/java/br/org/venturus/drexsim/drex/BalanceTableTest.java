@@ -41,7 +41,7 @@ class BalanceTableTest {
         tokens,
         List.of(
             new WalletBalances(new Wallet("reserve-a", "0x1234567890abcdef1234567890abcdef12345678", "SECP256K1-FALCON512"), reserve),
-            new WalletBalances(new Wallet("client-a2", "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", "MLDSA87"), client),
+            new WalletBalances(new Wallet("bruno", "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd", "MLDSA87"), client),
             new WalletBalances(new Wallet("idle", "0x0000000000000000000000000000000000000001", "SECP256K1"), empty)),
         Map.of("BRL", c(200_000_000), "BRLA", c(250_000)));
   }
@@ -57,6 +57,15 @@ class BalanceTableTest {
     assertTrue(table.contains("Total supply on chain"), table);
     assertTrue(table.contains("2.000.000,00"), table); // supply differs from the wallets shown
     assertTrue(table.contains("idle"), table);
+  }
+
+  @Test
+  void marksPausedTokensInTheHeader() {
+    Snapshot s = snapshot();
+    List<Token> tokens = List.of(s.tokens().get(0), new Token("BRLA", "Real Tokenizado Banco A", "0x02", "bank-a", true));
+    String table = BalanceTable.render(new Snapshot(s.blockNumber(), s.takenAt(), tokens, s.wallets(), s.totalSupply()), false);
+    assertTrue(table.contains("RT BRLA (paused)"), table);
+    assertTrue(table.contains("RD (BRL) ") && !table.contains("RD (BRL) (paused)"), table);
   }
 
   @Test

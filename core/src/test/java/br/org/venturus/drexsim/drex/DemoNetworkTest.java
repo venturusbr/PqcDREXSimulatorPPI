@@ -45,10 +45,23 @@ class DemoNetworkTest {
       assertEquals("998.865,44", rd(s, "reserve-a"));
       assertEquals("1.001.134,56", rd(s, "reserve-b"));
       assertEquals("50.000,00", rd(s, "bank-a"));
-      assertEquals("9.165,44", rt(s, "client-a1", "BRLA"));
-      assertEquals("2.200,00", rt(s, "client-a2", "BRLA"));
-      assertEquals("500,00", Amounts.format(row(s, "client-a2").of("BRLA").frozen()));
-      assertEquals("8.134,56", rt(s, "client-b1", "BRLB"));
+      assertEquals("9.165,44", rt(s, "ana", "BRLA"));
+      assertEquals("2.200,00", rt(s, "bruno", "BRLA"));
+      assertEquals("500,00", Amounts.format(row(s, "bruno").of("BRLA").frozen()));
+      assertEquals("8.134,56", rt(s, "carla", "BRLB"));
+      assertEquals("800,00", rt(s, "daniel", "BRLA"));
+      assertEquals("1.000,00", rt(s, "daniel", "BRLB"));
+      assertEquals("200,00", rt(s, "eva", "BRLA"));
+      assertEquals("800,00", rt(s, "fabio", "BRLB"));
+
+      // Which bank each client is at, as the contracts say (the GUI's Bank column).
+      assertEquals(List.of("BRLA"), row(s, "ana").roles().clientOf());
+      assertEquals(List.of("BRLA", "BRLB"), row(s, "daniel").roles().clientOf());
+      assertEquals(List.of(), row(s, "eva").roles().clientOf());
+      assertEquals(List.of(), row(s, "fabio").roles().clientOf());
+      assertEquals(List.of("BRLB"), row(s, "reserve-b").roles().reserveOf());
+      assertEquals(List.of("bank-a", "bank-b"),
+          s.tokens().subList(1, 3).stream().map(BalanceService.Token::issuer).toList());
 
       // Every DSA of the demo really went on chain.
       Set<String> signers = sent.stream().filter(SentTransaction::accepted)

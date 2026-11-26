@@ -51,23 +51,40 @@ public final class BalanceService {
     }
   }
 
-  /** A token column: Real Digital or one participant's Real Tokenizado. */
-  public record Token(String symbol, String name, String address) {}
+  /**
+   * A token column: Real Digital or one participant's Real Tokenizado. {@code issuer} names the bank that
+   * issues a Real Tokenizado: the label of its wallet when the snapshot shows that wallet (e.g. {@code bank-a},
+   * as in the wallet column), otherwise the participant name given when the token was deployed (e.g. {@code
+   * Banco A}, which {@code name} also holds). It is null for Real Digital. {@code paused} is the token's
+   * {@code paused()} at the snapshot's block: while it is true, every movement of the token reverts.
+   */
+  public record Token(String symbol, String name, String address, String issuer, boolean paused) {
+    public Token(String symbol, String name, String address) {
+      this(symbol, name, address, null, false);
+    }
+
+    public Token(String symbol, String name, String address, String issuer) {
+      this(symbol, name, address, issuer, false);
+    }
+
+    Token withPaused(boolean paused) {
+      return new Token(symbol, name, address, issuer, paused);
+    }
+  }
 
   /**
    * What a wallet is on chain, from the contracts' own access control at the snapshot's block: {@code
-   * bcb} holds DEFAULT_ADMIN_ROLE on RealDigital, {@code reserve} is the reserve wallet of a Real
-   * Tokenizado, {@code participant} is enabled in RealDigital (a bank or other institution), and
-   * {@code client} is enabled in the Real Tokenizado listed in {@code clientOf}. A wallet can have
-   * several roles, or none if it was never enabled anywhere.
+   * bcb} holds DEFAULT_ADMIN_ROLE on RealDigital, {@code reserve} is the reserve wallet of the Real
+   * Tokenizados listed in {@code reserveOf}, {@code participant} is enabled in RealDigital (a bank or other
+   * institution), and {@code client} is enabled in the Real Tokenizados listed in {@code clientOf}, so it is
+   * a client of their issuers. A wallet can have several roles, or none if it was never enabled anywhere.
+   *
+   * <p>{@code enabledIn} lists the tokens whose {@code verifyAccount} is true for it: a balance in any other
+   * token got there without the wallet being enabled (see the README's known contract flaws) or stayed after
+   * it was disabled.
    */
-  /**
-   * What the contracts say a wallet is. {@code enabledIn} lists the tokens whose {@code verifyAccount} is true
-   * for it: a balance in any other token got there without the wallet being enabled (see the README's known
-   * contract flaws) or stayed after it was disabled.
-   */
-  public record Roles(List<String> roles, List<String> clientOf, List<String> enabledIn) {
-    public static final Roles NONE = new Roles(List.of(), List.of(), List.of());
+  public record Roles(List<String> roles, List<String> clientOf, List<String> reserveOf, List<String> enabledIn) {
+    public static final Roles NONE = new Roles(List.of(), List.of(), List.of(), List.of());
   }
 
   public record WalletBalances(Wallet wallet, Map<String, Holding> holdings, Roles roles) {
@@ -100,23 +117,34 @@ public final class BalanceService {
   }
 
   public List<Token> tokens() {
+    return tokens(List.of());
+  }
+
+  /** The tokens, each Real Tokenizado's issuer named after its wallet among {@code wallets} when it is there. */
+  private List<Token> tokens(List<Wallet> wallets) {
+    Map<String, String> labels = new LinkedHashMap<>();
+    wallets.forEach(w -> labels.putIfAbsent(w.address().toLowerCase(), w.label()));
     List<Token> tokens = new ArrayList<>();
     tokens.add(new Token(RD, "Real Digital", deployment.realDigital));
     for (DrexDeployment.Tokenized t : deployment.realTokenizados) {
-      tokens.add(new Token(t.symbol(), "Real Tokenizado " + t.participant(), t.address()));
+      String issuer = t.authority() == null ? null : labels.get(t.authority().toLowerCase());
+      tokens.add(new Token(t.symbol(), "Real Tokenizado " + t.participant(), t.address(),
+          issuer != null ? issuer : t.participant()));
     }
     return tokens;
   }
 
   public Snapshot snapshot(List<Wallet> wallets) throws IOException {
     long block = chain.blockNumber();
-    List<Token> tokens = tokens();
+    List<Token> tokens = tokens(wallets);
     String rd = tokens.get(0).address();
     CallBatch calls = new CallBatch(DefaultBlockParameter.valueOf(BigInteger.valueOf(block)));
 
     Map<String, Integer> supply = new LinkedHashMap<>();
+    List<Integer> paused = new ArrayList<>();
     for (Token token : tokens) {
       supply.put(token.symbol(), calls.add(token.address(), fn("totalSupply", List.of(), UINT)));
+      paused.add(calls.add(token.address(), fn("paused", List.of(), BOOL)));
     }
     // Reserve wallets, as each Real Tokenizado records them.
     List<Integer> reserves = new ArrayList<>();
@@ -143,25 +171,35 @@ public final class BalanceService {
 
     calls.send();
 
-    List<String> reserveAddresses = reserves.stream().map(i -> calls.<String>get(i).toLowerCase()).toList();
+    for (int i = 0; i < tokens.size(); i++) {
+      tokens.set(i, tokens.get(i).withPaused(calls.get(paused.get(i))));
+    }
+
+    // Reserve address -> the Real Tokenizados it is the reserve of.
+    Map<String, List<String>> reserveOf = new LinkedHashMap<>();
+    for (int i = 0; i < reserves.size(); i++) {
+      String reserve = calls.<String>get(reserves.get(i)).toLowerCase();
+      reserveOf.computeIfAbsent(reserve, k -> new ArrayList<>()).add(tokens.get(i + 1).symbol());
+    }
     List<WalletBalances> rows = new ArrayList<>();
     for (int i = 0; i < wallets.size(); i++) {
       Map<String, Holding> row = new LinkedHashMap<>();
       holdings.get(i).forEach((symbol, at) -> row.put(symbol, new Holding(calls.get(at[0]), calls.get(at[1]))));
       Map<String, Boolean> access = new LinkedHashMap<>();
       enabled.get(i).forEach((symbol, at) -> access.put(symbol, calls.get(at)));
-      rows.add(new WalletBalances(wallets.get(i), row, roles(wallets.get(i), calls.get(admins.get(i)), access, reserveAddresses)));
+      rows.add(new WalletBalances(wallets.get(i), row, roles(wallets.get(i), calls.get(admins.get(i)), access, reserveOf)));
     }
     Map<String, BigInteger> totals = new LinkedHashMap<>();
     supply.forEach((symbol, at) -> totals.put(symbol, calls.get(at)));
     return new Snapshot(block, Instant.now(), tokens, rows, totals);
   }
 
-  private static Roles roles(Wallet wallet, boolean admin, Map<String, Boolean> enabled, List<String> reserves) {
+  private static Roles roles(Wallet wallet, boolean admin, Map<String, Boolean> enabled, Map<String, List<String>> reserves) {
     List<String> roles = new ArrayList<>();
     List<String> clientOf = new ArrayList<>();
     List<String> enabledIn = new ArrayList<>();
-    boolean reserve = reserves.contains(wallet.address().toLowerCase());
+    List<String> reserveOf = reserves.getOrDefault(wallet.address().toLowerCase(), List.of());
+    boolean reserve = !reserveOf.isEmpty();
     if (admin) roles.add("bcb");
     if (reserve) roles.add("reserve");
     enabled.forEach((symbol, isEnabled) -> {
@@ -174,7 +212,7 @@ public final class BalanceService {
       }
     });
     if (!clientOf.isEmpty()) roles.add("client");
-    return new Roles(List.copyOf(roles), List.copyOf(clientOf), List.copyOf(enabledIn));
+    return new Roles(List.copyOf(roles), List.copyOf(clientOf), List.copyOf(reserveOf), List.copyOf(enabledIn));
   }
 
   // ------------------------------------------------------------------ batched calls

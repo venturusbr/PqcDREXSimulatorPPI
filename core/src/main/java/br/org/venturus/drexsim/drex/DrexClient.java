@@ -136,6 +136,21 @@ public final class DrexClient {
     return key;
   }
 
+  /**
+   * Flow 8 for a client the KeyDictionary already knows from another bank: only enables it in this bank's
+   * Real Tokenizado. KeyDictionary keeps one record per CPF, so registering the key again would move it here.
+   */
+  public TransactionReceipt enableClient(Account bank, String symbol, Account client) throws Exception {
+    log.accept("Enabling client " + client.name() + " at " + symbol);
+    return realTokenizado(symbol, bank).enableAccount(client.address()).send();
+  }
+
+  /** The bank disables a client in its Real Tokenizado. Its balance stays where it was. */
+  public TransactionReceipt disableClient(Account bank, String symbol, Account client) throws Exception {
+    log.accept("Disabling client " + client.name() + " at " + symbol);
+    return realTokenizado(symbol, bank).disableAccount(client.address()).send();
+  }
+
   /** The KeyDictionary key of a client: {@code keccak256("cpf:" + cpf)}. */
   public static byte[] clientKey(BigInteger cpf) {
     return Hash.sha3(("cpf:" + cpf).getBytes());

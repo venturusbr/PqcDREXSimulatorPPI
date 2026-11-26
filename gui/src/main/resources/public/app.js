@@ -244,9 +244,39 @@ function renderContracts() {
     ['SwapOneStep', d.swapOneStep], ['SwapTwoSteps', d.swapTwoSteps], ['AddressDiscovery', d.addressDiscovery],
     ...(d.realTokenizados || []).map((t) => [`RealTokenizado ${t.symbol} (${t.participant})`, t.address]),
   ];
-  $('#contracts').innerHTML = `<thead><tr><th>${tr('network.contracts.contract')}</th><th>${tr('common.address')}</th></tr></thead><tbody>${rows
-    .map(([name, addr]) => `<tr><td>${esc(name)}</td><td><span class="addr" data-copy="${esc(addr)}">${esc(addr)}</span></td></tr>`)
+  $('#contracts').innerHTML = `<thead><tr><th>${tr('network.contracts.contract')}</th><th>${tr('common.address')}</th>
+      <th>${tr('network.contracts.status')}</th></tr></thead><tbody>${rows
+    .map(([name, addr]) => `<tr><td>${esc(name)}</td><td><span class="addr" data-copy="${esc(addr)}">${esc(addr)}</span></td>
+      <td>${tokenStatusHtml(addr)}</td></tr>`)
     .join('')}</tbody>`;
+}
+
+/** Whether the token at `addr` is paused, from the last balances snapshot; "–" for other contracts. */
+function tokenStatusHtml(addr) {
+  const t = state.snapshot?.tokens.find((x) => x.address?.toLowerCase() === addr?.toLowerCase());
+  if (!t) return '<span class="muted">–</span>';
+  return t.paused
+    ? `<span class="status paused" title="${esc(pausedHint(t))}">${PAUSE_ICON}${tr('token.paused')}</span>`
+    : `<span class="status success">${tr('token.active')}</span>`;
+}
+
+// ------------------------------------------------------------------ paused tokens
+
+/** Pause sign (two bars), drawn in currentColor, for paused tokens next to their symbol. */
+const PAUSE_ICON = '<svg class="pause-icon" viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="3" width="3" height="10" rx="1"/><rect x="9" y="3" width="3" height="10" rx="1"/></svg>';
+
+const pausedHint = (t) => tr('token.paused-hint', { token: t.symbol });
+const isPaused = (symbol) => !!state.snapshot?.tokens.find((t) => t.symbol === symbol)?.paused;
+
+/** The line above the balances while any token is paused, so it shows even when no row has that token. */
+function renderPausedNote(snap) {
+  const paused = (snap?.tokens || []).filter((t) => t.paused);
+  const note = $('#paused-note');
+  note.classList.toggle('hidden', !paused.length);
+  note.innerHTML = paused.length
+    ? `${PAUSE_ICON}<span><b>${esc(tr('token.paused-note', { tokens: paused.map((t) => t.symbol).join(', ') }))}</b>
+        <span class="muted">${tr('token.paused-note-hint')}</span></span>`
+    : '';
 }
 
 async function refreshBalances() {
@@ -266,6 +296,12 @@ async function refreshBalances() {
       !== JSON.stringify(state.snapshot?.wallets.map((w) => [w.wallet.address, w.roles]));
     state.snapshot = snap;
     if (rolesChanged) renderAccounts();
+    const pausedKey = snap.tokens.filter((t) => t.paused).map((t) => t.symbol).join();
+    if (pausedKey !== state.pausedKey) {
+      state.pausedKey = pausedKey;
+      renderContracts();
+      renderOperationForm();
+    }
   } catch (e) {
     if (e.status === 404) { state.deployment = null; $('#no-deployment').classList.remove('hidden'); }
   } finally {
@@ -318,7 +354,15 @@ function notEnabledFlag(w, symbol) {
 }
 
 const NO_HOLDING = { balance: 0, frozen: 0 };
-const tokenTag = (t) => ` <span class="token-tag" title="${esc(t.name)}">${esc(t.symbol)}</span>`;
+/** A token's chip; a paused token's is muted, dashed and starts with a pause sign. */
+const tokenTag = (t) => (t.paused
+  ? ` <span class="token-tag paused" title="${esc(`${t.name}: ${pausedHint(t)}`)}">${PAUSE_ICON}${esc(t.symbol)}</span>`
+  : ` <span class="token-tag" title="${esc(t.name)}">${esc(t.symbol)}</span>`);
+
+/** The Real Digital column header, which has no chip: it carries the pause badge itself. */
+const rdTh = (rd) => (rd?.paused
+  ? `<th class="num" title="${esc(`${rd.name}: ${pausedHint(rd)}`)}"><span class="paused-badge">${PAUSE_ICON}${tr('token.paused')}</span> RD (BRL)</th>`
+  : `<th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th>`);
 
 const INSTITUTION_ROLES = ['bcb', 'participant', 'reserve'];
 
@@ -328,6 +372,22 @@ const INSTITUTION_ROLES = ['bcb', 'participant', 'reserve'];
  * both. A wallet holding a token outside its role (e.g. RD sent to a client: transfer() checks only the
  * sender) is also listed where that token is, so each table's sum always matches the supply.
  */
+// ---- table filters: one search box per table, matched case-insensitively against some of its columns
+
+/** What was typed in a table's search box, trimmed. */
+const filterQuery = (id) => ($(`#${id}`)?.value || '').trim();
+/** Whether any of the fields contains the query (always, when the query is empty). */
+function matchesFilter(query, ...fields) {
+  const q = query.toLowerCase();
+  return !q || fields.some((f) => f != null && String(f).toLowerCase().includes(q));
+}
+/** The row shown when the search box hides every row. */
+const noMatchRow = (cols, query) => `<tr class="empty-row"><td colspan="${cols}">${esc(tr('filter.no-match', { q: query }))}</td></tr>`;
+/** A balances row passes the search box when its wallet name or address contains the query. */
+const walletMatches = (query) => (w) => matchesFilter(query, w.wallet.label, w.wallet.address);
+
+$('#balances-filter').addEventListener('input', () => renderBalances());
+
 // ---- balances view: split (participants and clients) or unified (one table); remembered per browser
 
 const BALANCES_VIEWS = ['split', 'unified'];
@@ -338,6 +398,7 @@ try {
 } catch (_) { /* storage unavailable */ }
 
 function renderBalances(snap = state.snapshot, prev = null) {
+  renderPausedNote(snap);
   $('#balances-split').classList.toggle('hidden', balancesView !== 'split');
   $('#balances-unified-wrap').classList.toggle('hidden', balancesView !== 'unified');
   document.querySelectorAll('#balances-view [data-view]').forEach((b) => {
@@ -375,10 +436,28 @@ function rtCellHtml(w, rts) {
     : amountHtml(NO_HOLDING, ' <span class="token-tag none">–</span>');
 }
 
-const walletCellsHtml = (w) => `
+/**
+ * The Bank cell: the participants whose Real Tokenizado the wallet is a client of (enabled in), or, for a
+ * reserve wallet, whose reserve it is, each tagged with its token. From the chain, not from the wallet's name.
+ */
+function bankCellHtml(w, rts) {
+  const r = w.roles || {};
+  const symbols = [...(r.clientOf || []), ...(r.reserveOf || [])];
+  if (!symbols.length) return '<span class="muted">–</span>';
+  return symbols.map((symbol) => {
+    const t = rts.find((x) => x.symbol === symbol);
+    return `<div class="rt-line"><span title="${esc(t?.name || '')}">${esc(t?.issuer || symbol)}</span>${t ? tokenTag(t) : ''}</div>`;
+  }).join('');
+}
+
+/** Name, [Bank,] signing and address cells of a balances row; the Bank cell when `rts` is given. */
+const walletCellsHtml = (w, rts) => `
       <td><span class="wallet-name"><span class="roles">${roleIcons(w)}</span>${esc(w.wallet.label)}</span></td>
+      ${rts ? `<td class="bank">${bankCellHtml(w, rts)}</td>` : ''}
       <td>${badge(w.wallet.signing)}</td>
       <td><span class="addr" data-copy="${esc(w.wallet.address)}">${esc(shortAddr(w.wallet.address))}</span></td>`;
+
+const bankTh = () => `<th title="${esc(tr('balances.bank-hint'))}">${tr('balances.bank')}</th>`;
 
 const perTokenHtml = (rts, values) => rts.map((t) => `<div class="rt-line">${money(values[t.symbol] || 0)}${tokenTag(t)}</div>`).join('')
   || money(0);
@@ -392,6 +471,7 @@ function renderUnifiedBalances(snap, prev) {
     return;
   }
   const hideEmpty = $('#hide-empty').checked;
+  const query = filterQuery('balances-filter');
   const rd = snap.tokens.find((t) => t.symbol === 'BRL');
   const rts = snap.tokens.filter((t) => t.symbol !== 'BRL');
   const changed = balanceChanges(prev);
@@ -399,19 +479,20 @@ function renderUnifiedBalances(snap, prev) {
   const rtSums = Object.fromEntries(rts.map((t) => [t.symbol, 0]));
   const rows = snap.wallets
     .filter((w) => !hideEmpty || snap.tokens.some((t) => holdsToken(w, t.symbol)))
+    .filter(walletMatches(query))
     .map((w) => {
       const h = w.holdings.BRL || NO_HOLDING;
       rdSum += Number(h.balance);
       rts.filter((t) => holdsToken(w, t.symbol)).forEach((t) => { rtSums[t.symbol] += Number(w.holdings[t.symbol].balance); });
-      return `<tr>${walletCellsHtml(w)}
+      return `<tr>${walletCellsHtml(w, rts)}
         <td class="num ${changed(w, 'BRL') ? 'flash' : ''}">${amountHtml(h, '', notEnabledFlag(w, 'BRL'))}</td>
         <td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
     }).join('');
-  table.innerHTML = `<thead><tr><th>${tr('balances.wallet')}</th><th>${tr('common.signs-with')}</th><th>${tr('common.address')}</th>
-      <th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th><th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
-    <tbody>${rows || `<tr class="empty-row"><td colspan="5">${tr('balances.empty')}</td></tr>`}</tbody>
-    <tfoot><tr><td colspan="3">${tr('balances.sum')}</td><td class="num">${money(rdSum)}</td><td class="num rt">${perTokenHtml(rts, rtSums)}</td></tr>
-    <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td>
+  table.innerHTML = `<thead><tr><th>${tr('balances.wallet')}</th>${bankTh()}<th>${tr('common.signs-with')}</th><th>${tr('common.address')}</th>
+      ${rdTh(rd)}<th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
+    <tbody>${rows || (query ? noMatchRow(6, query) : `<tr class="empty-row"><td colspan="6">${tr('balances.empty')}</td></tr>`)}</tbody>
+    <tfoot><tr><td colspan="4">${tr('balances.sum')}</td><td class="num">${money(rdSum)}</td><td class="num rt">${perTokenHtml(rts, rtSums)}</td></tr>
+    <tr class="supply"><td colspan="4">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td>
       <td class="num rt">${perTokenHtml(rts, snap.totalSupply)}</td></tr></tfoot>`;
   $('#balances-meta').textContent = tr('common.block-number', { n: snap.blockNumber });
 }
@@ -429,6 +510,8 @@ function renderSplitBalances(snap, prev) {
     return;
   }
   const hideEmpty = $('#hide-empty').checked;
+  const query = filterQuery('balances-filter');
+  const shown = walletMatches(query);
   const rd = snap.tokens.find((t) => t.symbol === 'BRL');
   const rts = snap.tokens.filter((t) => t.symbol !== 'BRL');
   const changed = balanceChanges(prev);
@@ -443,14 +526,15 @@ function renderSplitBalances(snap, prev) {
   let rdSum = 0;
   const participantRows = snap.wallets.filter(isParticipant)
     .filter((w) => !hideEmpty || holds(w, 'BRL'))
+    .filter(shown)
     .map((w) => {
       const h = w.holdings.BRL || NO_HOLDING;
       rdSum += Number(h.balance);
       return `<tr>${walletCells(w)}<td class="num ${changed(w, 'BRL') ? 'flash' : ''}">${amountHtml(h, '', notEnabledFlag(w, 'BRL'))}</td></tr>`;
     }).join('');
   participants.innerHTML = `<thead><tr><th>${tr('balances.participant')}</th><th>${tr('common.signs-with')}</th>
-      <th>${tr('common.address')}</th><th class="num" title="${esc(rd?.name || 'Real Digital')}">RD (BRL)</th></tr></thead>
-    <tbody>${participantRows || `<tr class="empty-row"><td colspan="4">${tr('balances.participants.empty')}</td></tr>`}</tbody>
+      <th>${tr('common.address')}</th>${rdTh(rd)}</tr></thead>
+    <tbody>${participantRows || (query ? noMatchRow(4, query) : `<tr class="empty-row"><td colspan="4">${tr('balances.participants.empty')}</td></tr>`)}</tbody>
     <tfoot><tr><td colspan="3">${tr('balances.participants.sum')}</td><td class="num">${money(rdSum)}</td></tr>
     <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num">${money(snap.totalSupply.BRL || 0)}</td></tr></tfoot>`;
 
@@ -458,19 +542,20 @@ function renderSplitBalances(snap, prev) {
   const rtSums = Object.fromEntries(rts.map((t) => [t.symbol, 0]));
   const clientRows = snap.wallets.filter(isClient)
     .filter((w) => !hideEmpty || holdsRt(w))
+    .filter(shown)
     .map((w) => {
       rts.filter((t) => holds(w, t.symbol)).forEach((t) => { rtSums[t.symbol] += Number(w.holdings[t.symbol].balance); });
-      return `<tr>${walletCells(w)}<td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
+      return `<tr>${walletCells(w, rts)}<td class="num rt ${rts.some((t) => changed(w, t.symbol)) ? 'flash' : ''}">${rtCellHtml(w, rts)}</td></tr>`;
     }).join('');
   const perToken = (values) => perTokenHtml(rts, values);
-  clients.innerHTML = `<thead><tr><th>${tr('balances.client')}</th><th>${tr('common.signs-with')}</th>
+  clients.innerHTML = `<thead><tr><th>${tr('balances.client')}</th>${bankTh()}<th>${tr('common.signs-with')}</th>
       <th>${tr('common.address')}</th><th class="num" title="${tr('balances.rt-column-hint')}">RT</th></tr></thead>
-    <tbody>${clientRows || `<tr class="empty-row"><td colspan="4">${tr('balances.clients.empty')}</td></tr>`}</tbody>
-    <tfoot><tr><td colspan="3">${tr('balances.clients.sum')}</td><td class="num rt">${perToken(rtSums)}</td></tr>
-    <tr class="supply"><td colspan="3">${tr('balances.total-supply')}</td><td class="num rt">${perToken(snap.totalSupply)}</td></tr></tfoot>`;
+    <tbody>${clientRows || (query ? noMatchRow(5, query) : `<tr class="empty-row"><td colspan="5">${tr('balances.clients.empty')}</td></tr>`)}</tbody>
+    <tfoot><tr><td colspan="4">${tr('balances.clients.sum')}</td><td class="num rt">${perToken(rtSums)}</td></tr>
+    <tr class="supply"><td colspan="4">${tr('balances.total-supply')}</td><td class="num rt">${perToken(snap.totalSupply)}</td></tr></tfoot>`;
 
   // Accounts in neither table: never enabled anywhere and holding nothing.
-  const unlisted = hideEmpty ? [] : snap.wallets.filter((w) => !isParticipant(w) && !isClient(w));
+  const unlisted = hideEmpty ? [] : snap.wallets.filter((w) => !isParticipant(w) && !isClient(w)).filter(shown);
   note.innerHTML = unlisted.length ? `${roleIcon('none', tr('role.none.hint'))}
     <div><b>${trn('balances.unlisted.title', unlisted.length)}</b>
       <span class="muted">${tr('balances.unlisted.text')}</span>
@@ -491,7 +576,8 @@ async function loadAccounts() {
 
 function renderAccounts() {
   const byAddress = new Map((state.snapshot?.wallets || []).map((w) => [w.wallet.address.toLowerCase(), w]));
-  const rows = state.accounts.map((a) => {
+  const query = filterQuery('accounts-filter');
+  const rows = state.accounts.filter((a) => matchesFilter(query, a.name, a.address)).map((a) => {
     const w = byAddress.get(a.address.toLowerCase());
     // Roles are read with the balances; an account created since the last snapshot has none yet.
     const roles = w ? `<span class="roles">${roleIcons(w)}</span>` : (state.deployment ? '<span class="roles"></span>' : '');
@@ -505,8 +591,26 @@ function renderAccounts() {
   }).join('');
   $('#accounts').innerHTML = `<thead><tr><th>${tr('common.name')}</th><th>${tr('common.signs-with')}</th><th>${tr('txs.title')}</th><th>${tr('common.address')}</th>
     <th class="num">${tr('common.public-key')}</th></tr></thead>
-    <tbody>${rows || `<tr class="empty-row"><td colspan="5">${tr('accounts.empty')}</td></tr>`}</tbody>`;
+    <tbody>${rows || (query ? noMatchRow(5, query) : `<tr class="empty-row"><td colspan="5">${tr('accounts.empty')}</td></tr>`)}</tbody>`;
 }
+
+$('#accounts-filter').addEventListener('input', () => renderAccounts());
+
+/**
+ * Makes the accounts table at least tall enough for its card to match the New account panel beside it, so
+ * the two end together; the CSS lets it grow up to the window's height from there before it scrolls inside.
+ */
+function fitAccountsTable() {
+  const wrap = $('#accounts').parentElement;
+  const card = wrap.closest('.card');
+  const panel = $('#tab-accounts .op-card');
+  if (!panel.offsetHeight) return; // tab hidden: the observer runs this again when it shows
+  const fit = Math.max(0, panel.offsetHeight - (card.offsetHeight - wrap.offsetHeight));
+  if (wrap.style.getPropertyValue('--fit') !== `${fit}px`) wrap.style.setProperty('--fit', `${fit}px`);
+}
+const accountsObserver = new ResizeObserver(fitAccountsTable);
+accountsObserver.observe($('#tab-accounts .op-card'));
+accountsObserver.observe($('#accounts').closest('.card'));
 
 function updateStandardToggle() {
   const dsa = $('#account-dsa').value;
@@ -566,6 +670,7 @@ function setWallet(form, name, value) {
 }
 
 $('#op-form').addEventListener('change', (e) => {
+  updatePauseWarning();
   const name = e.target.dataset?.wallet;
   if (name) {
     setWallet(e.currentTarget, name, e.target.value);
@@ -581,6 +686,42 @@ $('#op-select').addEventListener('change', () => {
 function tokenSymbols(includeRd) {
   const rts = (state.deployment?.realTokenizados || []).map((t) => t.symbol);
   return includeRd ? ['BRL', ...rts] : rts;
+}
+
+/** Options of a token field: paused tokens say so; Pause offers only active tokens and Resume only paused ones. */
+function tokenOptionsHtml(op, f) {
+  let symbols = tokenSymbols(f.type === 'token');
+  if (op.id === 'pause') symbols = symbols.filter((s) => !isPaused(s));
+  if (op.id === 'unpause') symbols = symbols.filter(isPaused);
+  if (!symbols.length) {
+    return `<option value="" disabled selected>${tr(op.id === 'pause' ? 'op.no-active-token' : 'op.no-paused-token')}</option>`;
+  }
+  return symbols.map((s) => `<option value="${esc(s)}">${esc(s)}${isPaused(s) && op.id !== 'unpause'
+    ? ` (${tr('token.paused-option')})` : ''}</option>`).join('');
+}
+
+/**
+ * Tokens each operation moves, so it reverts while any of them is paused. "@field" is the token chosen in
+ * that field. A swap burns the payer's Real Tokenizado, moves Real Digital between the reserves and mints
+ * the receiver's. Onboarding and enabling wallets are not blocked by a pause.
+ */
+const PAUSE_BLOCKS = {
+  'str-mint': ['BRL'], 'str-burn': ['BRL'], 'rd-transfer': ['BRL'],
+  deposit: ['@token'], withdraw: ['@token'], 'rt-transfer': ['@token'],
+  swap: ['@fromToken', '@toToken', 'BRL'],
+  freeze: ['@token'], unfreeze: ['@token'], 'forced-transfer': ['@token'],
+};
+
+/** Warns, before sending, that the operation will revert because a token it moves is paused. */
+function updatePauseWarning() {
+  const warn = $('#op-pause-warning');
+  if (!warn) return;
+  const form = $('#op-form');
+  const involved = (PAUSE_BLOCKS[$('#op-select').value] || [])
+    .map((x) => (x.startsWith('@') ? form.elements[x.slice(1)]?.value : x)).filter(Boolean);
+  const paused = [...new Set(involved.filter(isPaused))];
+  warn.classList.toggle('hidden', !paused.length);
+  warn.innerHTML = paused.length ? `${PAUSE_ICON}<span>${esc(tr('op.paused-warning', { tokens: paused.join(', ') }))}</span>` : '';
 }
 
 function renderOperationForm() {
@@ -606,8 +747,7 @@ function renderOperationForm() {
         break;
       case 'token':
       case 'rt':
-        input = `<select name="${f.name}" required>${tokenSymbols(f.type === 'token')
-          .map((s) => `<option>${esc(s)}</option>`).join('')}</select>`;
+        input = `<select name="${f.name}" required>${tokenOptionsHtml(op, f)}</select>`;
         break;
       case 'amount':
         input = `<input name="${f.name}" required inputmode="decimal" placeholder="1.000,00">`;
@@ -625,7 +765,8 @@ function renderOperationForm() {
     .map((n) => `<option value="${esc(n.name)}" ${n.primary ? 'selected' : ''} ${n.reachable === false ? 'disabled' : ''}>${esc(n.name)} · ${esc(n.url.replace(/^https?:\/\//, ''))}${n.primary ? ` (${tr('common.primary')})` : ''}${n.reachable === false ? ` – ${tr('status.down')}` : ''}</option>`).join('');
   const nodeField = `<label class="field"><span>${tr('op.send-to-node')}</span><select name="node">${nodeOptions}</select></label>`;
 
-  form.innerHTML = `${fields}${nodeField}<button class="primary" type="submit">${tr('op.submit')}</button>`;
+  form.innerHTML = `${fields}${nodeField}<div class="op-warning hidden" id="op-pause-warning" role="status"></div>
+    <button class="primary" type="submit">${tr('op.submit')}</button>`;
   for (const [k, v] of Object.entries(previous)) {
     const wallet = form.querySelector(`select[data-wallet="${k}"]`);
     if (wallet) setWallet(form, k, v);
@@ -648,6 +789,7 @@ function renderOperationForm() {
     const other = tokenSymbols(false).find((s) => s !== form.elements.fromToken.value);
     if (other) form.elements.toToken.value = other;
   }
+  updatePauseWarning();
 }
 
 $('#op-form').addEventListener('submit', async (e) => {
@@ -684,31 +826,40 @@ async function loadTransactions() {
   renderTransactions();
 }
 
-/** Steps the server logs under a name of their own, not an operation's. */
-const JOB_STEPS = { 'Demo setup': 'job-step.demo', 'Network setup': 'job-step.deploy' };
+/**
+ * Steps the server logs under a name of their own, not an operation's. Both are flow 0, network setup: the
+ * network setup deploys the contracts, and the demo setup does that and then runs the demo's flows as one step.
+ */
+const JOB_STEPS = { 'Demo setup': { key: 'job-step.demo', flow: 0 }, 'Network setup': { key: 'job-step.deploy', flow: 0 } };
 
 /** Name of an operation as the server logged it (its English label), in the interface's language. */
 function operationName(label) {
   const op = state.operations.find((o) => o.label === label);
   if (op) return opLabel(op);
-  return JOB_STEPS[label] ? tr(JOB_STEPS[label]) : label;
+  return JOB_STEPS[label] ? tr(JOB_STEPS[label].key) : label;
 }
 
-/** An operation as "17. Pause token"; setup steps, which have no flow number, by name only. */
-function operationTitle(label) {
+/** Flow number of an operation or setup step as the server logged it, or null if it has none. */
+function operationFlow(label) {
   const op = state.operations.find((o) => o.label === label);
-  return op?.flow ? `${op.flow}. ${opLabel(op)}` : operationName(label);
+  return op ? op.flow ?? null : JOB_STEPS[label]?.flow ?? null;
+}
+
+/** An operation as "17. Pause token"; a setup step without a flow number by name only. */
+function operationTitle(label) {
+  const flow = operationFlow(label);
+  return flow != null ? `${flow}. ${operationName(label)}` : operationName(label);
 }
 
 /**
  * The operation as "17. Pause token". When the table is too wide for its card, fitOperations() hides the
- * names, leaving the number with the full title as a tooltip. Setup steps have no number: they keep their name.
+ * names, leaving the number with the full title as a tooltip. A setup step without a number keeps its name.
  */
 function operationCell(label) {
   if (!label) return '–';
-  const op = state.operations.find((o) => o.label === label);
-  if (!op?.flow) return esc(operationName(label));
-  return `<span class="op-cell" data-title="${esc(operationTitle(label))}"><span class="op-number">${op.flow}</span><span class="op-name">. ${esc(opLabel(op))}</span></span>`;
+  const flow = operationFlow(label);
+  if (flow == null) return esc(operationName(label));
+  return `<span class="op-cell" data-title="${esc(operationTitle(label))}"><span class="op-number">${flow}</span><span class="op-name">. ${esc(operationName(label))}</span></span>`;
 }
 
 /** Shows the operations' names only if the table then fits its card without scrolling sideways. */
@@ -736,9 +887,17 @@ function contractCell(to, book) {
   return known ? `<span title="${esc(to)}">${esc(known.name)}</span>` : `<span class="small" title="${esc(to)}">${esc(shortAddr(to))}</span>`;
 }
 
+/** A transaction passes the search box when its operation, contract (name or address), account or hash contains the query. */
+function txMatches(tx, query, book) {
+  if (!query) return true;
+  const contract = tx.to ? book.get(tx.to.toLowerCase())?.name : tr('details.to-creation');
+  return matchesFilter(query, tx.operation && operationTitle(tx.operation), tx.operation, contract, tx.to, tx.account, tx.hash);
+}
+
 function renderTransactions() {
   const book = addressBook();
-  const rows = [...state.txs.values()].sort((a, b) => b.id - a.id).slice(0, 200).map((tx) => {
+  const query = filterQuery('txs-filter');
+  const rows = [...state.txs.values()].sort((a, b) => b.id - a.id).filter((tx) => txMatches(tx, query, book)).slice(0, 200).map((tx) => {
     const gas = tx.gasUsed != null ? `${num(tx.gasUsed)} <span class="small">/ ${num(tx.gasLimit)}</span>`
       : `<span class="small">${tr('txs.gas-limit', { n: num(tx.gasLimit) })}</span>`;
     const keyBytes = tx.publicKeyBytes ? `${num(tx.publicKeyBytes)} B` : tr('txs.key-recovered');
@@ -761,9 +920,20 @@ function renderTransactions() {
   $('#txs').innerHTML = `<thead><tr><th>${tr('common.time')}</th><th>${tr('common.operation')}</th><th>${tr('txs.contract')}</th><th>${tr('txs.account')}</th><th>${tr('common.signs-with')}</th>
     <th class="num">${tr('txs.size')}</th><th class="num">${tr('txs.signature-key')}</th><th class="num">${tr('txs.gas')}</th><th>${tr('common.status')}</th>
     <th>${tr('txs.hash')}</th></tr></thead>
-    <tbody>${rows || `<tr class="empty-row"><td colspan="10">${tr('txs.empty')}</td></tr>`}</tbody>`;
+    <tbody>${rows || (query ? noMatchRow(10, query) : `<tr class="empty-row"><td colspan="10">${tr('txs.empty')}</td></tr>`)}</tbody>`;
   fitOperations();
 }
+
+$('#txs-filter').addEventListener('input', () => renderTransactions());
+
+// ------------------------------------------------------------------ back to top
+
+/** A floating button, shown once the page has scrolled, that scrolls back to the top (on every tab). */
+const toTop = $('#to-top');
+const updateToTop = () => toTop.classList.toggle('hidden', scrollY < 300);
+addEventListener('scroll', updateToTop, { passive: true });
+toTop.addEventListener('click', () => scrollTo({ top: 0, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }));
+updateToTop();
 
 // ------------------------------------------------------------------ transaction details
 

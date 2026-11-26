@@ -14,9 +14,12 @@ import java.util.function.Consumer;
 
 /**
  * Builds a small Drex network for demonstrations and for the balance viewer: BCB, two banks, their
- * reserves and Real Tokenizados, and three clients. The actors sign with different DSAs, including
- * a classical bank (standard ECDSA transactions) for comparison, so one run exercises every kind of
- * signature the fork accepts.
+ * reserves and Real Tokenizados, and clients: ana and bruno at Banco A, carla at Banco B, daniel at both,
+ * fabio disabled by Banco B after a deposit, and eva, never onboarded, who still receives Real Tokenizado
+ * (transfer() checks only the sender). The names don't say which bank a client is at: the chain does, and
+ * the balance viewer reads it from there.
+ * The actors sign with different DSAs, including a classical bank (standard ECDSA transactions) for
+ * comparison, so one run exercises every kind of signature the fork accepts.
  *
  * <p>Each run deploys a fresh set of contracts and replaces {@code deployment.json}; accounts are
  * reused from {@code accounts.json}.
@@ -33,9 +36,12 @@ public final class DemoSetup {
           new Actor("reserve-a", Dsa.SECP256K1_FALCON512, TxFormat.FLEXIBLE),
           new Actor("bank-b", Dsa.SECP256K1, TxFormat.STANDARD),
           new Actor("reserve-b", Dsa.SECP256K1, TxFormat.STANDARD),
-          new Actor("client-a1", Dsa.SECP256K1_MLDSA44, TxFormat.FLEXIBLE),
-          new Actor("client-a2", Dsa.MLDSA87, TxFormat.FLEXIBLE),
-          new Actor("client-b1", Dsa.FALCON512, TxFormat.FLEXIBLE));
+          new Actor("ana", Dsa.SECP256K1_MLDSA44, TxFormat.FLEXIBLE),
+          new Actor("bruno", Dsa.MLDSA87, TxFormat.FLEXIBLE),
+          new Actor("carla", Dsa.FALCON512, TxFormat.FLEXIBLE),
+          new Actor("daniel", Dsa.MLDSA65, TxFormat.FLEXIBLE),
+          new Actor("eva", Dsa.SECP256K1, TxFormat.STANDARD),
+          new Actor("fabio", Dsa.FALCON512, TxFormat.FLEXIBLE));
 
   public static final BigInteger CNPJ_A = BigInteger.valueOf(11111111);
   public static final BigInteger CNPJ_B = BigInteger.valueOf(22222222);
@@ -62,9 +68,12 @@ public final class DemoSetup {
     Account reserveA = store.get("reserve-a");
     Account bankB = store.get("bank-b");
     Account reserveB = store.get("reserve-b");
-    Account clientA1 = store.get("client-a1");
-    Account clientA2 = store.get("client-a2");
-    Account clientB1 = store.get("client-b1");
+    Account ana = store.get("ana");
+    Account bruno = store.get("bruno");
+    Account carla = store.get("carla");
+    Account daniel = store.get("daniel");
+    Account eva = store.get("eva");
+    Account fabio = store.get("fabio");
 
     log.accept("== Flow 0: network setup");
     DrexDeployment deployment = DrexClient.deployNetwork(chain, bcb, log);
@@ -79,9 +88,9 @@ public final class DemoSetup {
     deployment.save(dataDir);
 
     log.accept("== Flow 8: clients");
-    drex.onboardClient(bankA, "BRLA", clientA1, new BigInteger("12345678901"), BigInteger.ONE, BigInteger.valueOf(1001), BigInteger.ONE);
-    drex.onboardClient(bankA, "BRLA", clientA2, new BigInteger("23456789012"), BigInteger.ONE, BigInteger.valueOf(1002), BigInteger.ONE);
-    drex.onboardClient(bankB, "BRLB", clientB1, new BigInteger("34567890123"), BigInteger.TWO, BigInteger.valueOf(2001), BigInteger.ONE);
+    drex.onboardClient(bankA, "BRLA", ana, new BigInteger("12345678901"), BigInteger.ONE, BigInteger.valueOf(1001), BigInteger.ONE);
+    drex.onboardClient(bankA, "BRLA", bruno, new BigInteger("23456789012"), BigInteger.ONE, BigInteger.valueOf(1002), BigInteger.ONE);
+    drex.onboardClient(bankB, "BRLB", carla, new BigInteger("34567890123"), BigInteger.TWO, BigInteger.valueOf(2001), BigInteger.ONE);
 
     log.accept("== Flow 4: Real Digital issued through STR");
     drex.strMint(reserveA, Amounts.parse("1.000.000,00"));
@@ -89,21 +98,35 @@ public final class DemoSetup {
     drex.strMint(bankA, Amounts.parse("50.000,00"));
 
     log.accept("== Flow 9: client deposits");
-    drex.deposit(bankA, "BRLA", clientA1, Amounts.parse("10.000,00"));
-    drex.deposit(bankA, "BRLA", clientA2, Amounts.parse("2.500,00"));
-    drex.deposit(bankB, "BRLB", clientB1, Amounts.parse("7.000,00"));
+    drex.deposit(bankA, "BRLA", ana, Amounts.parse("10.000,00"));
+    drex.deposit(bankA, "BRLA", bruno, Amounts.parse("2.500,00"));
+    drex.deposit(bankB, "BRLB", carla, Amounts.parse("7.000,00"));
 
-    log.accept("== Flow 15: judicial block of part of client-a2's balance");
-    drex.freeze(bankA, "BRLA", clientA2, Amounts.parse("500,00"));
+    log.accept("== Flow 15: judicial block of part of bruno's balance");
+    drex.freeze(bankA, "BRLA", bruno, Amounts.parse("500,00"));
 
-    log.accept("== Flow 12: client-a1 (Banco A) pays client-b1 (Banco B)");
-    drex.payOneStep(clientA1, "BRLA", "BRLB", clientB1.address(), Amounts.parse("1.234,56"));
+    log.accept("== Flow 12: ana (Banco A) pays carla (Banco B)");
+    drex.payOneStep(ana, "BRLA", "BRLB", carla.address(), Amounts.parse("1.234,56"));
 
-    log.accept("== Flow 11: client-a2 pays client-a1, both at Banco A (only the unfrozen part can move)");
-    drex.transfer(clientA2, "BRLA", clientA1.address(), Amounts.parse("300,00"));
+    log.accept("== Flow 11: bruno pays ana, both at Banco A (only the unfrozen part can move)");
+    drex.transfer(bruno, "BRLA", ana.address(), Amounts.parse("300,00"));
 
-    log.accept("== Flow 12: client-b1 (Banco B) pays client-a1 (Banco A)");
-    drex.payOneStep(clientB1, "BRLB", "BRLA", clientA1.address(), Amounts.parse("100,00"));
+    log.accept("== Flow 12: carla (Banco B) pays ana (Banco A)");
+    drex.payOneStep(carla, "BRLB", "BRLA", ana.address(), Amounts.parse("100,00"));
+
+    log.accept("== Flow 8: daniel, a client of both banks (his key stays registered at Banco A)");
+    drex.onboardClient(bankA, "BRLA", daniel, new BigInteger("45678901234"), BigInteger.ONE, BigInteger.valueOf(1003), BigInteger.ONE);
+    drex.enableClient(bankB, "BRLB", daniel);
+    drex.deposit(bankA, "BRLA", daniel, Amounts.parse("1.000,00"));
+    drex.deposit(bankB, "BRLB", daniel, Amounts.parse("1.000,00"));
+
+    log.accept("== Flow 11: daniel pays eva, who was never onboarded (transfer() checks only the sender)");
+    drex.transfer(daniel, "BRLA", eva.address(), Amounts.parse("200,00"));
+
+    log.accept("== Flow 8: fabio, a client Banco B disables after a deposit (the balance stays)");
+    drex.onboardClient(bankB, "BRLB", fabio, new BigInteger("56789012345"), BigInteger.TWO, BigInteger.valueOf(2002), BigInteger.ONE);
+    drex.deposit(bankB, "BRLB", fabio, Amounts.parse("800,00"));
+    drex.disableClient(bankB, "BRLB", fabio);
 
     deployment.save(dataDir);
     return deployment;

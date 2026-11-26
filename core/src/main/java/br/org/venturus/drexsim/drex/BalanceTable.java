@@ -27,7 +27,7 @@ public final class BalanceTable {
     List<Token> tokens = snapshot.tokens();
     List<String> header = new ArrayList<>(List.of("Wallet", "Signs with", "Address"));
     for (Token t : tokens) {
-      header.add(t.symbol().equals(BalanceService.RD) ? "RD (BRL)" : "RT " + t.symbol());
+      header.add((t.symbol().equals(BalanceService.RD) ? "RD (BRL)" : "RT " + t.symbol()) + (t.paused() ? " (paused)" : ""));
     }
 
     List<List<String>> rows = new ArrayList<>();
