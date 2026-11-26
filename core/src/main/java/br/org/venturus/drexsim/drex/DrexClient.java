@@ -154,6 +154,13 @@ public final class DrexClient {
             "Symbol %s is already used by the Real Tokenizado of %s (CNPJ8 %s) at %s, so nothing was sent",
             t.symbol(), t.participant(), t.cnpj8(), t.address()));
       }
+      // The name and reserve are fixed when the token is deployed: finishing its setup cannot change them.
+      if (!t.participant().equals(participantName) || !t.reserve().equalsIgnoreCase(reserve.address())) {
+        throw new IllegalStateException(String.format(
+            "Real Tokenizado %s was deployed for %s with reserve wallet %s, not %s with %s, so nothing was sent. "
+                + "To finish its setup, use the values it was deployed with", symbol, t.participant(), t.reserve(),
+            participantName, reserve.name()));
+      }
       log.accept("Finishing the setup of Real Tokenizado " + symbol + " at " + t.address());
       List<TransactionReceipt> receipts = finishSetup(t, bank, discovery, entry);
       if (receipts.isEmpty()) {
@@ -189,17 +196,34 @@ public final class DrexClient {
     try {
       receipts.addAll(finishSetup(token, bank, discovery, entry));
     } catch (Exception e) {
-      Throwable root = e;
-      while (root.getCause() != null && root.getCause() != root) {
-        root = root.getCause();
-      }
-      IllegalStateException halfway = new IllegalStateException(String.format(
-          "Real Tokenizado %s was deployed at %s, but its setup did not finish (%s). Run this again with the same "
-              + "values to finish it", symbol, rt.getContractAddress(), root.getMessage()));
+      IllegalStateException halfway = new IllegalStateException(setupDidNotFinish(symbol, rt.getContractAddress(), e));
       halfway.addSuppressed(e);
       throw halfway;
     }
     return new DeployedToken(token, receipts);
+  }
+
+  private static final java.util.regex.Pattern REVERT =
+      java.util.regex.Pattern.compile("[Ee]xecution reverted:? ?\\(?(.*?)\\)?$");
+
+  /**
+   * The error of a Real Tokenizado deployed whose setup then failed with {@code e}. A revert is reduced to
+   * its reason: callers such as the GUI shorten any message that contains a raw revert, which would drop
+   * the token's address and how to finish its setup.
+   */
+  static String setupDidNotFinish(String symbol, String address, Throwable e) {
+    Throwable root = e;
+    while (root.getCause() != null && root.getCause() != root) {
+      root = root.getCause();
+    }
+    String cause = root.getMessage() == null ? root.getClass().getSimpleName() : root.getMessage();
+    java.util.regex.Matcher revert = REVERT.matcher(cause);
+    if (revert.find()) {
+      String reason = revert.group(1).trim();
+      cause = "the contract refused a step" + (reason.isEmpty() ? "" : ": " + reason);
+    }
+    return String.format("Real Tokenizado %s was deployed at %s, but its setup did not finish, so run this again with "
+        + "the same values to finish it. Cause: %s", symbol, address, cause);
   }
 
   /**

@@ -222,6 +222,7 @@ public final class FlowSuite {
     expectRefused("another token for bank A's CNPJ8", () ->
         drex.deployRealTokenizado(bcb, bankB, reserveB, "Banco B", "BRLC", CNPJ_A));
     expectRefused("BRLA again, already set up", () -> drex.deployRealTokenizado(bcb, bankA, reserveA, "Banco A", "BRLA", CNPJ_A));
+    expectRefused("BRLA again with another reserve", () -> drex.deployRealTokenizado(bcb, bankA, bankA, "Banco A", "BRLA", CNPJ_A));
     expectEquals(brla, d.tokenized("BRLA").orElseThrow().address(), "BRLA after the refused deploys");
     expectEquals(brla, AddressDiscovery.load(d.addressDiscovery, chain.web3j(), chain.readOnly(), chain.gasProvider())
         .addressDiscovery(Hash.sha3(("RealTokenizado@" + CNPJ_A).getBytes())).send(), "AddressDiscovery entry of bank A");
