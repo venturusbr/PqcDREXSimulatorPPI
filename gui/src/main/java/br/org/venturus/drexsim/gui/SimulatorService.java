@@ -98,7 +98,8 @@ final class SimulatorService implements AutoCloseable {
           List.of(new Field("participant", "Participant", "account"), new Field("reserve", "Reserve wallet", "account"),
               new Field("cnpj8", "CNPJ8", "number"))),
       new Operation("deploy-rt", "Deploy a participant's Real Tokenizado", 7, "the participant",
-          "The bank deploys its tokenized deposit and authorizes the swaps; BCB registers it.",
+          "The bank deploys its tokenized deposit and authorizes the swaps; BCB registers it. A symbol or CNPJ8 that "
+              + "already has a token is refused; the same values again finish a setup that stopped halfway.",
           List.of(new Field("participant", "Participant", "account"), new Field("reserve", "Reserve wallet", "account"),
               new Field("name", "Participant name", "text"), new Field("symbol", "Symbol", "text"),
               new Field("cnpj8", "CNPJ8", "number"))),
@@ -428,9 +429,12 @@ final class SimulatorService implements AutoCloseable {
         }
         case "deploy-rt" -> {
           signer = account(p, "participant");
-          drex.deployRealTokenizado(bcb(), signer, account(p, "reserve"), required(p, "name"), required(p, "symbol"),
-              number(p, "cnpj8"));
-          deployment.save(dataDir);
+          try {
+            drex.deployRealTokenizado(bcb(), signer, account(p, "reserve"), required(p, "name"), required(p, "symbol"),
+                number(p, "cnpj8")).receipts().forEach(r -> hashes.add(r.getTransactionHash()));
+          } finally {
+            deployment.save(dataDir); // also a token whose setup failed halfway, so it can be finished
+          }
         }
         case "onboard-client" -> {
           signer = tokenAuthority(p.get("token"));

@@ -217,7 +217,7 @@
   "op.signed-by": "Signed by {who}.",
   "op.submit": "Sign and send",
   "op.title": "Run an operation",
-  "operation.deploy-rt.description": "The bank deploys its tokenized deposit and authorizes the swaps; BCB registers it.",
+  "operation.deploy-rt.description": "The bank deploys its tokenized deposit and authorizes the swaps; BCB registers it. A symbol or CNPJ8 that already has a token is refused; the same values again finish a setup that stopped halfway.",
   "operation.deploy-rt.label": "Deploy a participant's Real Tokenizado",
   "operation.deploy-rt.signer": "the participant",
   "operation.deposit.description": "The bank issues Real Tokenizado to its client.",

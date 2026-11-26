@@ -210,6 +210,17 @@ public final class FlowSuite {
     expectEquals(CNPJ_A, rt("BRLA", bcb).cnpj8().send(), "BRLA cnpj8");
     expectEquals(reserveB.address(), rt("BRLB", bcb).reserve().send(), "BRLB reserve");
     expect(rt("BRLB", bcb).hasRole(DrexClient.MINTER_ROLE, d.swapOneStep).send(), "SwapOneStep mints BRLB");
+    // Issue #17: a symbol or CNPJ8 that already has a token is refused, so the existing token stays.
+    String brla = d.tokenized("BRLA").orElseThrow().address();
+    expectRefused("another token with symbol brla", () ->
+        drex.deployRealTokenizado(bcb, bankB, reserveB, "Banco B", "brla", new BigInteger("33333333")));
+    expectRefused("another token for bank A's CNPJ8", () ->
+        drex.deployRealTokenizado(bcb, bankB, reserveB, "Banco B", "BRLC", CNPJ_A));
+    expectRefused("BRLA again, already set up", () -> drex.deployRealTokenizado(bcb, bankA, reserveA, "Banco A", "BRLA", CNPJ_A));
+    expectEquals(brla, d.tokenized("BRLA").orElseThrow().address(), "BRLA after the refused deploys");
+    expectEquals(brla, AddressDiscovery.load(d.addressDiscovery, chain.web3j(), chain.readOnly(), chain.gasProvider())
+        .addressDiscovery(Hash.sha3(("RealTokenizado@" + CNPJ_A).getBytes())).send(), "AddressDiscovery entry of bank A");
+    expectEquals(2, d.realTokenizados.size(), "Real Tokenizados");
   }
 
   private void flow8OnboardClients() throws Exception {

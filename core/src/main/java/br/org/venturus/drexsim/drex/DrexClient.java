@@ -101,32 +101,100 @@ public final class DrexClient {
         .send();
   }
 
+  /** A Real Tokenizado and the receipts of the transactions sent for it, in order. */
+  public record DeployedToken(DrexDeployment.Tokenized token, List<TransactionReceipt> receipts) {}
+
   /**
    * Flow 7: the participant deploys its Real Tokenizado and authorizes the swaps to mint it; BCB
    * registers it in AddressDiscovery. Also enables the token's own address, without which {@code
    * moveAndBurn} reverts (see docs/contracts-reference.md).
+   *
+   * <p>A symbol or CNPJ8 that already has a Real Tokenizado is refused before any transaction (issue #17):
+   * the simulator would lose track of that token, and AddressDiscovery would point its CNPJ8 elsewhere. The
+   * token is recorded in the deployment as soon as it is deployed, so a setup that fails halfway does not
+   * lose it; running this again with the same values finishes that setup.
    */
-  public DrexDeployment.Tokenized deployRealTokenizado(
+  public DeployedToken deployRealTokenizado(
       Account bcb, Account bank, Account reserve, String participantName, String symbol, BigInteger cnpj8) throws Exception {
+    AddressDiscovery discovery =
+        AddressDiscovery.load(deployment.addressDiscovery, chain.web3j(), chain.managerFor(bcb), chain.gasProvider());
+    byte[] entry = Hash.sha3(("RealTokenizado@" + cnpj8).getBytes());
+    var known = deployment.tokenized(symbol);
+    if (known.isPresent()) {
+      DrexDeployment.Tokenized t = known.get();
+      if (!t.symbol().equals(symbol) || !t.cnpj8().equals(cnpj8) || !t.authority().equalsIgnoreCase(bank.address())) {
+        throw new IllegalStateException(String.format(
+            "Symbol %s is already used by the Real Tokenizado of %s (CNPJ8 %s) at %s, so nothing was sent",
+            t.symbol(), t.participant(), t.cnpj8(), t.address()));
+      }
+      log.accept("Finishing the setup of Real Tokenizado " + symbol + " at " + t.address());
+      List<TransactionReceipt> receipts = finishSetup(t, bank, discovery, entry);
+      if (receipts.isEmpty()) {
+        throw new IllegalStateException(String.format(
+            "Real Tokenizado %s of %s is already deployed and set up at %s, so nothing was sent", symbol,
+            t.participant(), t.address()));
+      }
+      return new DeployedToken(t, receipts);
+    }
+    var sameCnpj8 = deployment.realTokenizados.stream().filter(t -> t.cnpj8().equals(cnpj8)).findFirst();
+    if (sameCnpj8.isPresent()) {
+      throw new IllegalStateException(String.format(
+          "CNPJ8 %s already has a Real Tokenizado, %s of %s at %s, so nothing was sent", cnpj8,
+          sameCnpj8.get().symbol(), sameCnpj8.get().participant(), sameCnpj8.get().address()));
+    }
+    String registered = discovery.addressDiscovery(entry).send();
+    if (!isZero(registered)) {
+      throw new IllegalStateException(String.format(
+          "AddressDiscovery already has a Real Tokenizado for CNPJ8 %s at %s, so nothing was sent", cnpj8, registered));
+    }
+
     log.accept("Deploying Real Tokenizado " + symbol + " of " + participantName);
-    var tm = chain.managerFor(bank);
     RealTokenizado rt =
         RealTokenizado.deploy(
-                chain.web3j(), tm, chain.gasProvider(), "Real Tokenizado " + participantName, symbol,
+                chain.web3j(), chain.managerFor(bank), chain.gasProvider(), "Real Tokenizado " + participantName, symbol,
                 bank.address(), bank.address(), participantName, cnpj8, reserve.address())
             .send();
-    rt.grantRole(MINTER_ROLE, deployment.swapOneStep).send();
-    rt.grantRole(MINTER_ROLE, deployment.swapTwoSteps).send();
-    rt.enableAccount(rt.getContractAddress()).send();
-    AddressDiscovery.load(deployment.addressDiscovery, chain.web3j(), chain.managerFor(bcb), chain.gasProvider())
-        .updateAddress(Hash.sha3(("RealTokenizado@" + cnpj8).getBytes()), rt.getContractAddress())
-        .send();
-
     var token = new DrexDeployment.Tokenized(
         participantName, symbol, cnpj8, rt.getContractAddress(), bank.address(), reserve.address());
-    deployment.realTokenizados.removeIf(t -> t.symbol().equalsIgnoreCase(symbol));
     deployment.realTokenizados.add(token);
-    return token;
+    List<TransactionReceipt> receipts = new java.util.ArrayList<>();
+    rt.getTransactionReceipt().ifPresent(receipts::add);
+    try {
+      receipts.addAll(finishSetup(token, bank, discovery, entry));
+    } catch (Exception e) {
+      Throwable root = e;
+      while (root.getCause() != null && root.getCause() != root) {
+        root = root.getCause();
+      }
+      IllegalStateException halfway = new IllegalStateException(String.format(
+          "Real Tokenizado %s was deployed at %s, but its setup did not finish (%s). Run this again with the same "
+              + "values to finish it", symbol, rt.getContractAddress(), root.getMessage()));
+      halfway.addSuppressed(e);
+      throw halfway;
+    }
+    return new DeployedToken(token, receipts);
+  }
+
+  /**
+   * The steps after a Real Tokenizado is deployed, each sent only if it is not done yet: the swaps may mint
+   * it, its own address is enabled, and AddressDiscovery points its CNPJ8 to it.
+   */
+  private List<TransactionReceipt> finishSetup(DrexDeployment.Tokenized token, Account bank, AddressDiscovery discovery,
+      byte[] entry) throws Exception {
+    RealTokenizado rt = RealTokenizado.load(token.address(), chain.web3j(), chain.managerFor(bank), chain.gasProvider());
+    List<TransactionReceipt> receipts = new java.util.ArrayList<>();
+    for (String swap : List.of(deployment.swapOneStep, deployment.swapTwoSteps)) {
+      if (!rt.hasRole(MINTER_ROLE, swap).send()) {
+        receipts.add(rt.grantRole(MINTER_ROLE, swap).send());
+      }
+    }
+    if (!rt.verifyAccount(token.address()).send()) {
+      receipts.add(rt.enableAccount(token.address()).send());
+    }
+    if (!token.address().equalsIgnoreCase(discovery.addressDiscovery(entry).send())) {
+      receipts.add(discovery.updateAddress(entry, token.address()).send());
+    }
+    return receipts;
   }
 
   /**
