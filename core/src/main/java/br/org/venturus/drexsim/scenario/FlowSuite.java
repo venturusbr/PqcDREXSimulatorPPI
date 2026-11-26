@@ -166,6 +166,11 @@ public final class FlowSuite {
     expect(rd(bcb).verifyAccount(bankA.address()).send(), "bank A enabled");
     expect(rd(bcb).verifyAccount(reserveB.address()).send(), "reserve B enabled");
     expectEquals(bankA.address(), defaultAccount(bcb).defaultAccount(CNPJ_A).send(), "default wallet of bank A");
+    // Issue #18: addDefaultAccount would replace bank A's default wallet, so the simulator refuses before sending.
+    expectRefused("bank B onboarded with bank A's CNPJ8", () -> drex.onboardParticipant(bcb, bankB, reserveB, CNPJ_A));
+    expectRefused("bank A onboarded again", () -> drex.onboardParticipant(bcb, bankA, reserveA, CNPJ_A));
+    expectEquals(bankA.address(), defaultAccount(bcb).defaultAccount(CNPJ_A).send(),
+        "default wallet of bank A after the refused onboardings");
   }
 
   private void flow2EnableDisableOwnWallets() throws Exception {

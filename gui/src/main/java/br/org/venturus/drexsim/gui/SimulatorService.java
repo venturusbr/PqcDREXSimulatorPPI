@@ -94,7 +94,8 @@ final class SimulatorService implements AutoCloseable {
       new Operation("unpause", "Resume token", 17, "the token's authority", "Ends the emergency pause.",
           List.of(new Field("token", "Token", "token"))),
       new Operation("onboard-participant", "Onboard a participant", 1, "BCB",
-          "Enables a bank and its reserve wallet in Real Digital and records its default wallet.",
+          "Enables a bank and its reserve wallet in Real Digital and records its default wallet. A CNPJ8 whose "
+              + "default wallet is another one is refused.",
           List.of(new Field("participant", "Participant", "account"), new Field("reserve", "Reserve wallet", "account"),
               new Field("cnpj8", "CNPJ8", "number"))),
       new Operation("deploy-rt", "Deploy a participant's Real Tokenizado", 7, "the participant",
@@ -425,7 +426,8 @@ final class SimulatorService implements AutoCloseable {
         }
         case "onboard-participant" -> {
           signer = bcb();
-          drex.onboardParticipant(signer, account(p, "participant"), account(p, "reserve"), number(p, "cnpj8"));
+          drex.onboardParticipant(signer, account(p, "participant"), account(p, "reserve"), number(p, "cnpj8"))
+              .forEach(r -> hashes.add(r.getTransactionHash()));
         }
         case "deploy-rt" -> {
           signer = account(p, "participant");

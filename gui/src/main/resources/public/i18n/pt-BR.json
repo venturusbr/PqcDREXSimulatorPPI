@@ -237,7 +237,7 @@
   "operation.onboard-client.description": "Habilita o cliente no Real Tokenizado do banco e registra sua chave (CPF) no KeyDictionary. Um CPF registrado para outra carteira é recusado; um cliente cujo CPF já é sua chave é apenas habilitado.",
   "operation.onboard-client.label": "Cadastrar um cliente",
   "operation.onboard-client.signer": "o banco do token",
-  "operation.onboard-participant.description": "Habilita um banco e sua carteira de reserva no Real Digital e registra sua carteira padrão.",
+  "operation.onboard-participant.description": "Habilita um banco e sua carteira de reserva no Real Digital e registra sua carteira default. Um CNPJ8 cuja carteira default é outra é recusado.",
   "operation.onboard-participant.label": "Cadastrar um participante",
   "operation.onboard-participant.signer": "o BCB",
   "operation.pause.description": "Pausa de emergência: bloqueia toda movimentação.",

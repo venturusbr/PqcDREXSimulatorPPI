@@ -88,17 +88,44 @@ public final class DrexClient {
     discovery.updateAddress(Hash.sha3(name.getBytes()), address).send();
   }
 
-  /** Flow 1: BCB enables a participant and its reserve wallet and records its default wallet. */
-  public void onboardParticipant(Account bcb, Account participant, Account reserve, BigInteger cnpj8) throws Exception {
+  /**
+   * Flow 1: BCB enables a participant and its reserve wallet and records its default wallet.
+   *
+   * <p>{@code RealDigitalDefaultAccount.addDefaultAccount} overwrites the default wallet a CNPJ8 already has,
+   * so a CNPJ8 whose default wallet is another one is refused before any transaction (issue #18). Steps
+   * already done are not sent again, so running this again finishes an onboarding that stopped halfway.
+   *
+   * @return the receipts of the transactions sent, in order
+   */
+  public List<TransactionReceipt> onboardParticipant(Account bcb, Account participant, Account reserve, BigInteger cnpj8)
+      throws Exception {
     log.accept("Onboarding participant " + participant.name() + " (CNPJ8 " + cnpj8 + ")");
     RealDigital rd = realDigital(bcb);
-    rd.enableAccount(participant.address()).send();
-    if (!reserve.address().equals(participant.address())) {
-      rd.enableAccount(reserve.address()).send();
+    RealDigitalDefaultAccount defaults = RealDigitalDefaultAccount.load(deployment.realDigitalDefaultAccount,
+        chain.web3j(), chain.managerFor(bcb), chain.gasProvider());
+    String current = defaults.defaultAccount(cnpj8).send();
+    boolean recorded = !isZero(current);
+    if (recorded && !current.equalsIgnoreCase(participant.address())) {
+      throw new IllegalStateException(String.format(
+          "CNPJ8 %s already has the default wallet %s. RealDigitalDefaultAccount would replace it with %s's, so "
+              + "nothing was sent", cnpj8, current, participant.name()));
     }
-    RealDigitalDefaultAccount.load(deployment.realDigitalDefaultAccount, chain.web3j(), chain.managerFor(bcb), chain.gasProvider())
-        .addDefaultAccount(cnpj8, participant.address())
-        .send();
+    List<TransactionReceipt> receipts = new java.util.ArrayList<>();
+    for (Account wallet : participant.address().equalsIgnoreCase(reserve.address())
+        ? List.of(participant) : List.of(participant, reserve)) {
+      if (!rd.verifyAccount(wallet.address()).send()) {
+        receipts.add(rd.enableAccount(wallet.address()).send());
+      }
+    }
+    if (!recorded) {
+      receipts.add(defaults.addDefaultAccount(cnpj8, participant.address()).send());
+    }
+    if (receipts.isEmpty()) {
+      throw new IllegalStateException(String.format("%s is already onboarded with CNPJ8 %s%s, so nothing was sent",
+          participant.name(), cnpj8,
+          participant.address().equalsIgnoreCase(reserve.address()) ? "" : " and its reserve " + reserve.name() + " is enabled"));
+    }
+    return receipts;
   }
 
   /** A Real Tokenizado and the receipts of the transactions sent for it, in order. */
