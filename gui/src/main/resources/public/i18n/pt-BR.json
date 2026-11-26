@@ -234,7 +234,7 @@
   "operation.freeze.field.token": "Token",
   "operation.freeze.label": "Congelar saldo",
   "operation.freeze.signer": "a autoridade do token",
-  "operation.onboard-client.description": "Habilita o cliente no Real Tokenizado do banco e registra sua chave (CPF) no KeyDictionary.",
+  "operation.onboard-client.description": "Habilita o cliente no Real Tokenizado do banco e registra sua chave (CPF) no KeyDictionary. Um CPF registrado para outra carteira é recusado; um cliente cujo CPF já é sua chave é apenas habilitado.",
   "operation.onboard-client.label": "Cadastrar um cliente",
   "operation.onboard-client.signer": "o banco do token",
   "operation.onboard-participant.description": "Habilita um banco e sua carteira de reserva no Real Digital e registra sua carteira padrão.",

@@ -220,6 +220,16 @@ public final class FlowSuite {
     KeyDictionary.CustomerData data = keyDictionary(bcb).getCustomerData(DrexClient.clientKey(CPF_X)).send();
     expectEquals(CPF_X, data.taxId, "client X CPF");
     expectEquals(bankA.address(), data.owner, "client X key owner");
+    // Issue #16: KeyDictionary.addAccount would overwrite these keys, so the simulator refuses before sending.
+    expectRefused("bank B onboarding client X's CPF for another wallet", () ->
+        drex.onboardClient(bankB, "BRLB", clientY, CPF_X, BigInteger.TWO, BigInteger.valueOf(202), BigInteger.ONE));
+    expectRefused("client X onboarded again under another CPF", () ->
+        drex.onboardClient(bankA, "BRLA", clientX, new BigInteger("99999999999"), BigInteger.ONE, BigInteger.valueOf(103),
+            BigInteger.ONE));
+    expectRefused("client X onboarded again at its bank", () ->
+        drex.onboardClient(bankA, "BRLA", clientX, CPF_X, BigInteger.ONE, BigInteger.valueOf(101), BigInteger.ONE));
+    expectEquals(clientX.address(), keyDictionary(bcb).getWallet(DrexClient.clientKey(CPF_X)).send(),
+        "client X key after the refused onboardings");
   }
 
   private void flow9Deposits() throws Exception {

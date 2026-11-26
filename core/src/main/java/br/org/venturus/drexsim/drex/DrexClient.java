@@ -12,10 +12,12 @@ import br.org.venturus.drexsim.contracts.SwapOneStep;
 import br.org.venturus.drexsim.contracts.SwapTwoSteps;
 import br.org.venturus.drexsim.keystore.Account;
 import java.math.BigInteger;
+import java.util.List;
 import java.util.function.Consumer;
 import org.web3j.crypto.Hash;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
 import org.web3j.protocol.exceptions.TransactionException;
+import org.web3j.utils.Numeric;
 
 /**
  * Runs the Drex use-case flows (docs/use-case-flows.md) on chain, each call signed by the
@@ -127,14 +129,66 @@ public final class DrexClient {
     return token;
   }
 
-  /** Flow 8: the bank enables its client in its Real Tokenizado and registers the client's key. */
-  public byte[] onboardClient(Account bank, String symbol, Account client, BigInteger cpf, BigInteger bankNumber,
-      BigInteger accountNumber, BigInteger branch) throws Exception {
+  /**
+   * Flow 8: the bank enables its client in its Real Tokenizado and registers the client's key (CPF) in
+   * KeyDictionary.
+   *
+   * <p>{@code KeyDictionary.addAccount} overwrites an existing key (a contract flaw, see the README), so
+   * this refuses, before any transaction, a CPF registered to another wallet and a wallet registered under
+   * another CPF (issue #16). A client whose key is already this wallet's, registered by any bank, is only
+   * enabled in this bank's token, as {@link #enableClient} does. Steps already done are not sent again.
+   *
+   * @return the receipts of the transactions sent, in order
+   */
+  public List<TransactionReceipt> onboardClient(Account bank, String symbol, Account client, BigInteger cpf,
+      BigInteger bankNumber, BigInteger accountNumber, BigInteger branch) throws Exception {
     log.accept("Onboarding client " + client.name() + " at " + symbol);
-    realTokenizado(symbol, bank).enableAccount(client.address()).send();
+    RealTokenizado token = realTokenizado(symbol, bank);
+    KeyDictionary keys = keyDictionary(bank);
     byte[] key = clientKey(cpf);
-    keyDictionary(bank).addAccount(key, cpf, bankNumber, accountNumber, branch, client.address()).send();
-    return key;
+    String keyWallet = keys.getWallet(key).send();
+    boolean keyFree = isZero(keyWallet);
+    if (!keyFree && !keyWallet.equalsIgnoreCase(client.address())) {
+      KeyDictionary.CustomerData holder = keys.getCustomerData(key).send();
+      throw new IllegalStateException(String.format(
+          "CPF %s is already registered to wallet %s, by participant %s. KeyDictionary would move the key to %s and "
+              + "take it from that client, so nothing was sent", cpf, keyWallet, holder.owner, client.name()));
+    }
+    byte[] walletKey = keys.getKey(client.address()).send();
+    if (!isZero(walletKey) && !java.util.Arrays.equals(walletKey, key)) {
+      KeyDictionary.CustomerData registered = keys.getCustomerData(walletKey).send();
+      throw new IllegalStateException(String.format(
+          "%s is already registered under CPF %s, by participant %s, so nothing was sent", client.name(),
+          registered.taxId, registered.owner));
+    }
+    boolean enabled = token.verifyAccount(client.address()).send();
+    if (enabled && !keyFree) {
+      throw new IllegalStateException(String.format(
+          "%s is already a client of %s with CPF %s, so nothing was sent", client.name(), symbol, cpf));
+    }
+    List<TransactionReceipt> receipts = new java.util.ArrayList<>();
+    if (!enabled) {
+      receipts.add(token.enableAccount(client.address()).send());
+    }
+    if (keyFree) {
+      receipts.add(keys.addAccount(key, cpf, bankNumber, accountNumber, branch, client.address()).send());
+    } else {
+      log.accept("CPF " + cpf + " is already " + client.name() + "'s key: only enabling it at " + symbol);
+    }
+    return receipts;
+  }
+
+  private static boolean isZero(String address) {
+    return address == null || Numeric.toBigInt(address).signum() == 0;
+  }
+
+  private static boolean isZero(byte[] bytes) {
+    for (byte b : bytes) {
+      if (b != 0) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**

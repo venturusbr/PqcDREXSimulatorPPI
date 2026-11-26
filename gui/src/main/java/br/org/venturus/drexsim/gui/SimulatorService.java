@@ -103,7 +103,8 @@ final class SimulatorService implements AutoCloseable {
               new Field("name", "Participant name", "text"), new Field("symbol", "Symbol", "text"),
               new Field("cnpj8", "CNPJ8", "number"))),
       new Operation("onboard-client", "Onboard a client", 8, "the bank of the token",
-          "Enables the client in the bank's Real Tokenizado and registers its key (CPF) in KeyDictionary.",
+          "Enables the client in the bank's Real Tokenizado and registers its key (CPF) in KeyDictionary. A CPF "
+              + "registered to another wallet is refused; a client whose CPF is already its key is only enabled.",
           List.of(new Field("token", "Real Tokenizado", "rt"), new Field("client", "Client", "account"), new Field("cpf", "CPF", "number"))),
       new Operation("enable-wallet", "Enable a wallet in Real Digital", 2, "an enabled participant",
           "A participant enables another wallet through RealDigitalEnableAccount.",
@@ -434,7 +435,7 @@ final class SimulatorService implements AutoCloseable {
         case "onboard-client" -> {
           signer = tokenAuthority(p.get("token"));
           drex.onboardClient(signer, p.get("token"), account(p, "client"), number(p, "cpf"), BigInteger.ONE,
-              BigInteger.ONE, BigInteger.ONE);
+              BigInteger.ONE, BigInteger.ONE).forEach(r -> hashes.add(r.getTransactionHash()));
         }
         case "enable-wallet" -> {
           signer = account(p, "participant");
@@ -449,7 +450,8 @@ final class SimulatorService implements AutoCloseable {
       events.send("balances-changed", Map.of("operation", op));
       return new OpResult(op, true, spec.label() + " done", signer == null ? null : signer.name(), node.name(), hashes);
     } catch (Exception e) {
-      return new OpResult(op, false, rootMessage(e), signer == null ? null : signer.name(), node.name(), hashes);
+      return new OpResult(op, false, withNames(rootMessage(e)), signer == null ? null : signer.name(), node.name(),
+          hashes);
     } finally {
       currentOperation.remove();
     }
@@ -590,6 +592,14 @@ final class SimulatorService implements AutoCloseable {
 
   private Path reportDir(String kind) {
     return reportsDir.resolve("gui-" + kind + "-" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss")));
+  }
+
+  private static final java.util.regex.Pattern ADDRESS = java.util.regex.Pattern.compile("0x[0-9a-fA-F]{40}(?![0-9a-fA-F])");
+
+  /** {@code message} with the addresses of known accounts followed by their names. */
+  String withNames(String message) {
+    return ADDRESS.matcher(message).replaceAll(m -> java.util.regex.Matcher.quoteReplacement(
+        store.byAddress(m.group()).map(a -> m.group() + " (" + a.name() + ")").orElse(m.group())));
   }
 
   private static final java.util.regex.Pattern REVERT =

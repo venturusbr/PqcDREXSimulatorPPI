@@ -234,7 +234,7 @@
   "operation.freeze.field.token": "Token",
   "operation.freeze.label": "Freeze balance",
   "operation.freeze.signer": "the token's authority",
-  "operation.onboard-client.description": "Enables the client in the bank's Real Tokenizado and registers its key (CPF) in KeyDictionary.",
+  "operation.onboard-client.description": "Enables the client in the bank's Real Tokenizado and registers its key (CPF) in KeyDictionary. A CPF registered to another wallet is refused; a client whose CPF is already its key is only enabled.",
   "operation.onboard-client.label": "Onboard a client",
   "operation.onboard-client.signer": "the bank of the token",
   "operation.onboard-participant.description": "Enables a bank and its reserve wallet in Real Digital and records its default wallet.",
