@@ -202,6 +202,14 @@ Transfers value from a client of bank A to a client of bank B in **one transacti
 
 There is no check that the caller is a client of `tokenSender` beyond the burn itself.
 
+**Allowances around a swap:**
+
+- **Payer side.** The paying client's `approve` is a transaction of its own, sent before `executeSwap`. If the swap is then refused (frozen funds, a paused token, a receiver not enabled, a reserve without enough Real Digital), the approval stays mined and the allowance stays open. The contracts can't undo that, because the two calls can't be one transaction.
+  - The simulator's `payOneStep` first checks the usual reasons for a refusal and sends nothing if one applies.
+  - It doesn't approve again when the allowance already covers the amount.
+  - If the swap is refused anyway, it sets the allowance back to what it was. That costs one more transaction.
+- **Receiver side.** `mint` grants the minter allowance over the minted amount (see [RealDigital caveats](#caveats-behavior-of-this-implementation)). Every swap a client receives therefore raises that client's allowance for SwapOneStep on `tokenReceiver`. This comes from the contracts, and the simulator leaves it as is.
+
 ---
 
 ## SwapTwoSteps

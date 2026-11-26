@@ -15,6 +15,7 @@ import java.math.BigInteger;
 import java.util.function.Consumer;
 import org.web3j.crypto.Hash;
 import org.web3j.protocol.core.methods.response.TransactionReceipt;
+import org.web3j.protocol.exceptions.TransactionException;
 
 /**
  * Runs the Drex use-case flows (docs/use-case-flows.md) on chain, each call signed by the
@@ -182,14 +183,91 @@ public final class DrexClient {
     return realTokenizado(symbol, from).transfer(to, amount).send();
   }
 
-  /** Flow 12: inter-bank client payment in one step through SwapOneStep. */
+  /**
+   * Flow 12: inter-bank client payment in one step through SwapOneStep. SwapOneStep burns the payer's Real
+   * Tokenizado with {@code burnFrom}, so the payer first approves it, in a transaction of its own.
+   *
+   * <p>So that a refused payment does not leave that approval on chain (issue #13): the usual reasons for a
+   * refusal are checked first, before any transaction; no approval is sent when the allowance already
+   * covers the amount; and if the swap is refused anyway, the allowance is set back to what it was.
+   */
   public TransactionReceipt payOneStep(Account payer, String fromSymbol, String toSymbol, String receiver, BigInteger amount)
       throws Exception {
     log.accept("Swap " + Amounts.format(amount) + " " + fromSymbol + " -> " + toSymbol + " from " + payer.name());
-    realTokenizado(fromSymbol, payer).approve(deployment.swapOneStep, amount).send();
-    return SwapOneStep.load(deployment.swapOneStep, chain.web3j(), chain.managerFor(payer), chain.gasProvider())
-        .executeSwap(token(fromSymbol).address(), token(toSymbol).address(), receiver, amount)
-        .send();
+    RealTokenizado from = realTokenizado(fromSymbol, payer);
+    checkSwap(payer, from, fromSymbol, realTokenizado(toSymbol, payer), toSymbol, amount);
+    BigInteger allowance = from.allowance(payer.address(), deployment.swapOneStep).send();
+    boolean approved = allowance.compareTo(amount) < 0;
+    if (approved) {
+      from.approve(deployment.swapOneStep, amount).send();
+    }
+    try {
+      return SwapOneStep.load(deployment.swapOneStep, chain.web3j(), chain.managerFor(payer), chain.gasProvider())
+          .executeSwap(token(fromSymbol).address(), token(toSymbol).address(), receiver, amount)
+          .send();
+    } catch (Exception e) {
+      if (approved && !mayStillBeIncluded(e)) {
+        log.accept("Swap refused: setting the allowance of SwapOneStep back to " + Amounts.format(allowance) + " "
+            + fromSymbol);
+        try {
+          from.approve(deployment.swapOneStep, allowance).send();
+        } catch (Exception undo) {
+          e.addSuppressed(undo);
+        }
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Whether a transaction that failed with {@code e} may still be included: it was sent (web3j knows its
+   * hash) but no receipt came in time, or the connection failed, perhaps after the node took it. A refusal
+   * by {@code eth_estimateGas} or by the node has no hash, and a revert on chain has a receipt; such a
+   * transaction is over.
+   */
+  static boolean mayStillBeIncluded(Exception e) {
+    if (e instanceof TransactionException te) {
+      return te.getTransactionHash().isPresent() && te.getTransactionReceipt().isEmpty();
+    }
+    return e instanceof java.io.IOException;
+  }
+
+  /**
+   * Refuses, before any transaction, a swap that the contracts would refuse for a reason the payer can see:
+   * a paused token, too little balance once frozen funds are set aside, or a bank reserve without the
+   * Real Digital to move. Messages start like the contracts' own.
+   */
+  private void checkSwap(Account payer, RealTokenizado from, String fromSymbol, RealTokenizado to, String toSymbol,
+      BigInteger amount) throws Exception {
+    if (amount.signum() <= 0) {
+      throw new IllegalArgumentException("The amount must be positive, not " + Amounts.format(amount));
+    }
+    RealDigital rd = realDigital(payer);
+    if (from.paused().send()) {
+      throw new IllegalStateException("Pausable: paused (" + fromSymbol + " is paused)");
+    }
+    if (to.paused().send()) {
+      throw new IllegalStateException("Pausable: paused (" + toSymbol + " is paused)");
+    }
+    if (rd.paused().send()) {
+      throw new IllegalStateException("Pausable: paused (Real Digital is paused)");
+    }
+    BigInteger balance = from.balanceOf(payer.address()).send();
+    BigInteger frozen = from.frozenBalanceOf(payer.address()).send();
+    BigInteger available = balance.subtract(frozen).max(BigInteger.ZERO);
+    if (available.compareTo(amount) < 0) {
+      throw new IllegalStateException(String.format(
+          "RealDigital: insufficient balance (%s has %s %s available, %s of %s frozen; the payment is %s)",
+          payer.name(), Amounts.format(available), fromSymbol, Amounts.format(frozen), Amounts.format(balance),
+          Amounts.format(amount)));
+    }
+    String reserve = from.reserve().send();
+    BigInteger reserveAvailable = rd.balanceOf(reserve).send().subtract(rd.frozenBalanceOf(reserve).send());
+    if (reserveAvailable.compareTo(amount) < 0) {
+      throw new IllegalStateException(String.format(
+          "RealDigital: insufficient balance (the reserve of %s's bank has %s Real Digital available; the payment is %s)",
+          fromSymbol, Amounts.format(reserveAvailable.max(BigInteger.ZERO)), Amounts.format(amount)));
+    }
   }
 
   // ---------------------------------------------------------------- contract handles
