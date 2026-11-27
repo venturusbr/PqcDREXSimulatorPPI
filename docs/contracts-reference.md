@@ -232,6 +232,19 @@ Statuses: `PENDING` → `EXECUTED` or `CANCELLED`.
 **Caveats:**
 - Funds are **not** frozen at `startSwap` (`FREEZER_ROLE` is not used), so the swap can fail at execution if the payer spent the balance or revoked the allowance.
 - The `ExpiredProposal` event is declared (and its comment says 1 minute) but never emitted. The real expiry is 7 days, enforced only inside `executeSwap`.
+- `startSwap` checks nothing: not the tokens, not whether the receiver is enabled, not the amount, not the allowance. A proposal that can never be executed is stored all the same.
+- The proposal counter is private. Proposals can be listed by reading `swapProposals(id)` from 1 until an empty one, since ids have no gaps.
+- `cancelSwap` doesn't touch the payer's allowance, and an expired proposal stays `PENDING` until someone cancels it.
+
+**Allowances around a two-step payment:**
+
+- **One allowance for every pending payment.** `executeSwap` burns with `burnFrom`, so each pending payment needs its share of the payer's allowance to SwapTwoSteps on `tokenSender`, at the time it's accepted.
+- **What the simulator does:**
+  - `startTwoStepPayment` first runs the same checks as a one-step payment, so a proposal that the acceptance would refuse isn't stored.
+  - It raises the allowance, only when it's lower, to what the payer's pending payments that can still be accepted need, plus this one.
+  - `acceptTwoStepPayment` checks the payer's balance, the reserve and the allowance again, since days may have passed.
+  - When the payer cancels, the cancelled payment's share is withdrawn, down to what the other pending payments still need. That costs one more transaction.
+  - When the receiver cancels, the payer's allowance stays: only the payer can change it.
 
 ---
 
@@ -266,6 +279,8 @@ Registry of each participant's default wallet, keyed by CNPJ8. Lets other partie
 
 `admin` is stored but no function uses it.
 
+`updateDefaultWallet` doesn't check that `newWallet` is enabled in RealDigital, nor that it differs from the current one. The simulator's `changeDefaultWallet` refuses both before sending.
+
 ---
 
 ## KeyDictionary
@@ -291,6 +306,11 @@ Stored data (`CustomerData`): `taxId` (CPF), `bankNumber` (participant code), `a
 - `registered` is always stored as `false`, so the `"Key already registered"` check in `requestKey` never blocks.
 - Two `requestKey` calls by the same participant in the same block get the same `proposalId`; the second overwrites the first.
 - An old wallet is not removed from the `wallets` mapping when the key's wallet changes.
+- Requests are private (`keyRequests`), and only `requestKey` emits an event. Pending requests can only be found from the `KeyRequested` events, which name the bank that asked, not the bank that holds the key.
+- `authorizeKey` emits no event and never closes the request. If the key later moves back, an old authorized request can be authorized again and moves the key once more.
+  - The simulator's `keyRequests` treats as closed any request made before the current owner's own latest request for the key, and refuses to authorize it.
+- `authorizeKey` only checks the caller, the request's key and its age. It doesn't check that the requester is still a participant, nor that the new wallet is still free.
+  - The simulator refuses a new wallet already registered under another key, when the request is made and again when it's authorized.
 
 ---
 

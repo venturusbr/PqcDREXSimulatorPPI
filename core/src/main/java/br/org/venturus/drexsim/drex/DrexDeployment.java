@@ -35,6 +35,12 @@ public final class DrexDeployment {
   public String swapTwoSteps;
   public String addressDiscovery;
   public List<Tokenized> realTokenizados = new ArrayList<>();
+  /**
+   * Block the contracts were deployed after, when this run deployed them; 0 when read from the file. Only a
+   * hint for reading events, kept out of the file so that older builds can still read it.
+   */
+  @com.fasterxml.jackson.annotation.JsonIgnore
+  public long deployedAt;
 
   public Optional<Tokenized> tokenized(String symbol) {
     return realTokenizados.stream().filter(t -> t.symbol().equalsIgnoreCase(symbol)).findFirst();

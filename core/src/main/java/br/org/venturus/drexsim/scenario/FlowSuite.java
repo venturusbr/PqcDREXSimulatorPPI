@@ -181,11 +181,15 @@ public final class FlowSuite {
   }
 
   private void flow3ChangeDefaultWallet() throws Exception {
+    // The new default wallet must be enabled: spare was disabled in flow 2.
+    expectRefused("a default wallet that is not enabled", () -> drex.changeDefaultWallet(bankA, CNPJ_A, spare.address()));
+    expectRefused("bank B changes bank A's default wallet", () -> drex.changeDefaultWallet(bankB, CNPJ_A, bankB.address()));
     enableAccount(bankA).enableAccount(bankANew.address()).send();
-    defaultAccount(bankA).updateDefaultWallet(CNPJ_A, bankANew.address()).send();
+    drex.changeDefaultWallet(bankA, CNPJ_A, bankANew.address());
     expectEquals(bankANew.address(), defaultAccount(bcb).defaultAccount(CNPJ_A).send(), "new default wallet");
     expectRefused("old default wallet changes it again",
         () -> defaultAccount(bankA).updateDefaultWallet(CNPJ_A, bankA.address()).send());
+    expectRefused("the same default wallet again", () -> drex.changeDefaultWallet(bankANew, CNPJ_A, bankANew.address()));
   }
 
   private void flow4StrMint() throws Exception {
@@ -287,36 +291,59 @@ public final class FlowSuite {
   }
 
   private void flow13SwapTwoSteps() throws Exception {
-    String brla = d.tokenized("BRLA").orElseThrow().address();
-    String brlb = d.tokenized("BRLB").orElseThrow().address();
+    BigInteger x = rt("BRLA", bcb).balanceOf(clientX.address()).send();
+    // Refused before sending: a payment above the balance, and a receiver not enabled in the receiving token.
+    expectRefused("a payment above the balance", () ->
+        drex.startTwoStepPayment(clientX, "BRLA", "BRLB", clientY.address(), x.add(BigInteger.ONE)));
+    expectRefused("a receiver not enabled in BRLB", () ->
+        drex.startTwoStepPayment(clientX, "BRLA", "BRLB", clientX2.address(), reais(1)));
+    expectEquals(BigInteger.ZERO, rt("BRLA", bcb).allowance(clientX.address(), d.swapTwoSteps).send(),
+        "allowance after the refused proposals");
 
-    rt("BRLA", clientX).approve(d.swapTwoSteps, reais(700)).send();
-    BigInteger accepted = proposalId(swapTwo(clientX).startSwap(brla, brlb, clientY.address(), reais(700)).send());
+    BigInteger accepted = drex.startTwoStepPayment(clientX, "BRLA", "BRLB", clientY.address(), reais(700)).proposalId();
     expectEquals(reais(2_500), rt("BRLB", bcb).balanceOf(clientY.address()).send(), "nothing moves at proposal");
     expectRefused("payer executes its own proposal", () -> swapTwo(clientX).executeSwap(accepted).send());
-    swapTwo(clientY).executeSwap(accepted).send();
+    expectRefused("payer accepts its own proposal", () -> drex.acceptTwoStepPayment(clientX, accepted));
+    drex.acceptTwoStepPayment(clientY, accepted);
     expectEquals(reais(3_200), rt("BRLB", bcb).balanceOf(clientY.address()).send(), "client Y after acceptance");
     expectEquals(BigInteger.ONE, swapTwo(bcb).swapProposals(accepted).send().component6(), "EXECUTED");
+    expectRefused("a payment accepted twice", () -> drex.acceptTwoStepPayment(clientY, accepted));
 
-    BigInteger cancelled = proposalId(swapTwo(clientX).startSwap(brla, brlb, clientY.address(), reais(100)).send());
-    swapTwo(clientY).cancelSwap(cancelled, "not expected").send();
+    BigInteger cancelled = drex.startTwoStepPayment(clientX, "BRLA", "BRLB", clientY.address(), reais(100)).proposalId();
+    expectRefused("cancelled by neither side", () -> drex.cancelTwoStepPayment(clientX2, cancelled, "not mine"));
+    drex.cancelTwoStepPayment(clientX, cancelled, "changed my mind");
     expectEquals(BigInteger.TWO, swapTwo(bcb).swapProposals(cancelled).send().component6(), "CANCELLED");
+    expectEquals(BigInteger.ZERO, rt("BRLA", bcb).allowance(clientX.address(), d.swapTwoSteps).send(),
+        "allowance after the payer cancelled");
+    expectRefused("a cancelled payment accepted", () -> drex.acceptTwoStepPayment(clientY, cancelled));
     expectEquals(reais(6_300), rt("BRLA", bcb).balanceOf(clientX.address()).send(), "client X after both");
   }
 
   private void flow14KeyPortability() throws Exception {
     byte[] key = DrexClient.clientKey(CPF_X);
-    rt("BRLB", bankB).enableAccount(clientXatB.address()).send();
-    TransactionReceipt request = keyDictionary(bankB)
-        .requestKey(key, CPF_X, BigInteger.TWO, BigInteger.valueOf(299), BigInteger.ONE, clientXatB.address()).send();
-    List<KeyDictionary.KeyRequestedEventResponse> events = KeyDictionary.getKeyRequestedEvents(request);
-    expect(events.size() == 1, "one KeyRequested event");
+    // Refused before sending: the key's own bank asking for it, and a CPF without a key.
+    expectRefused("bank A asks for its own client's key", () ->
+        drex.requestKey(bankA, "BRLA", clientX2, CPF_X, BigInteger.ONE, BigInteger.valueOf(199), BigInteger.ONE));
+    expectRefused("a CPF without a key", () -> drex.requestKey(bankB, "BRLB", clientXatB, new BigInteger("99999999999"),
+        BigInteger.TWO, BigInteger.valueOf(299), BigInteger.ONE));
+    DrexClient.Proposed request =
+        drex.requestKey(bankB, "BRLB", clientXatB, CPF_X, BigInteger.TWO, BigInteger.valueOf(299), BigInteger.ONE);
+    BigInteger id = request.proposalId();
+    expect(id != null, "one KeyRequested event");
+    expect(rt("BRLB", bcb).verifyAccount(clientXatB.address()).send(), "new wallet enabled at bank B");
+    expect(drex.keyRequests().stream().anyMatch(r -> r.id().equals(id) && r.owner().equalsIgnoreCase(bankA.address())
+        && clientXatB.address().equalsIgnoreCase(r.wallet()) && CPF_X.equals(r.cpf())), "the request is open");
+    expectRefused("bank B asks again", () ->
+        drex.requestKey(bankB, "BRLB", clientXatB, CPF_X, BigInteger.TWO, BigInteger.valueOf(299), BigInteger.ONE));
     expectRefused("a participant that does not own the key authorizes it",
-        () -> keyDictionary(bankB).authorizeKey(events.get(0).proposalId, key).send());
-    keyDictionary(bankA).authorizeKey(events.get(0).proposalId, key).send();
+        () -> keyDictionary(bankB).authorizeKey(id, key).send());
+    expectRefused("bank B authorizes its own request", () -> drex.authorizeKey(bankB, id));
+    drex.authorizeKey(bankA, id);
     KeyDictionary.CustomerData data = keyDictionary(bcb).getCustomerData(key).send();
     expectEquals(bankB.address(), data.owner, "key owner after portability");
     expectEquals(clientXatB.address(), data.wallet, "key wallet after portability");
+    expect(drex.keyRequests().stream().noneMatch(r -> r.id().equals(id)), "the request is closed");
+    expectRefused("a request authorized twice", () -> drex.authorizeKey(bankA, id));
   }
 
   private void flow15FreezeUnfreeze() throws Exception {
@@ -418,14 +445,6 @@ public final class FlowSuite {
 
   private SwapTwoSteps swapTwo(Account as) {
     return SwapTwoSteps.load(d.swapTwoSteps, chain.web3j(), chain.managerFor(as), chain.gasProvider());
-  }
-
-  private static BigInteger proposalId(TransactionReceipt receipt) {
-    List<SwapTwoSteps.SwapStartedEventResponse> events = SwapTwoSteps.getSwapStartedEvents(receipt);
-    if (events.size() != 1) {
-      throw new AssertionError("expected one SwapStarted event, got " + events.size());
-    }
-    return events.get(0).proposalId;
   }
 
   @FunctionalInterface

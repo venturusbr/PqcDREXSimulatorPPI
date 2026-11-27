@@ -43,14 +43,19 @@ import org.web3j.protocol.http.HttpService;
 /** What the web API does: network state, accounts, balances, Drex operations and evaluation jobs. */
 final class SimulatorService implements AutoCloseable {
 
-  /** A field of an operation form. Types: account, wallet (account or address), token, rt, amount, text, number. */
+  /**
+   * A field of an operation form. Types: account, wallet (account or address), token, rt, amount, text, note
+   * (optional text), number, swap-proposal (a pending two-step payment), party (its payer or receiver) and
+   * key-request (an open key request).
+   */
   record Field(String name, String label, String type) {}
 
   /** An operation the GUI offers, tied to its use-case flow in docs/use-case-flows.md. */
   record Operation(String id, String label, int flow, String signer, String description, List<Field> fields) {}
 
-  /** Result of an operation. */
-  record OpResult(String operation, boolean ok, String message, String signer, String node, List<String> transactions) {}
+  /** Result of an operation. {@code proposal} is the id of the proposal it made, for flows 13 and 14. */
+  record OpResult(String operation, boolean ok, String message, String signer, String node, List<String> transactions,
+      String proposal) {}
 
   record AccountView(String name, String address, String dsa, String format, String signing, boolean quantumResistant,
       int publicKeyBytes) {}
@@ -110,7 +115,36 @@ final class SimulatorService implements AutoCloseable {
           List.of(new Field("token", "Real Tokenizado", "rt"), new Field("client", "Client", "account"), new Field("cpf", "CPF", "number"))),
       new Operation("enable-wallet", "Enable a wallet in Real Digital", 2, "an enabled participant",
           "A participant enables another wallet through RealDigitalEnableAccount.",
-          List.of(new Field("participant", "Participant", "account"), new Field("wallet", "Wallet", "wallet"))));
+          List.of(new Field("participant", "Participant", "account"), new Field("wallet", "Wallet", "wallet"))),
+      new Operation("change-default", "Change a participant's default wallet", 3, "the current default wallet",
+          "The current default wallet of a CNPJ8 hands that role to another wallet, which must be enabled in Real "
+              + "Digital.",
+          List.of(new Field("participant", "Current default wallet", "account"), new Field("cnpj8", "CNPJ8", "number"),
+              new Field("wallet", "New default wallet", "wallet"))),
+      new Operation("swap2-start", "Propose a payment to a client of another bank", 13, "the paying client",
+          "SwapTwoSteps: records the payment, and nothing moves until the receiver accepts it, within 7 days. The "
+              + "payer's approval covers its pending payments; what would make the acceptance fail is refused now.",
+          List.of(new Field("from", "From", "account"), new Field("fromToken", "Payer's Real Tokenizado", "rt"),
+              new Field("toToken", "Receiver's Real Tokenizado", "rt"), new Field("to", "Receiver", "wallet"),
+              new Field("amount", "Amount (R$)", "amount"))),
+      new Operation("swap2-accept", "Accept a payment from a client of another bank", 13, "the receiving client",
+          "Executes a pending payment: burns the payer's Real Tokenizado, moves Real Digital between the bank "
+              + "reserves and mints the receiver's. The payer's balance and approval are checked again first.",
+          List.of(new Field("proposal", "Pending payment", "swap-proposal"))),
+      new Operation("swap2-cancel", "Cancel a payment to a client of another bank", 13, "the payer or the receiver",
+          "Cancels a pending payment. When the payer cancels, the approval it gave for this payment is withdrawn.",
+          List.of(new Field("proposal", "Pending payment", "swap-proposal"), new Field("by", "Cancelled by", "party"),
+              new Field("reason", "Reason", "note"))),
+      new Operation("key-request", "Request a client's key from another bank", 14, "the bank asking for the key",
+          "The new bank asks for the KeyDictionary key (CPF) of a client of another bank, for the client's wallet at "
+              + "the new bank, which is enabled in its Real Tokenizado if needed. The other bank has 7 days to "
+              + "authorize it.",
+          List.of(new Field("token", "Real Tokenizado of the new bank", "rt"),
+              new Field("client", "Client's wallet at the new bank", "account"), new Field("cpf", "CPF", "number"))),
+      new Operation("key-authorize", "Authorize a key request", 14, "the bank that holds the key",
+          "Moves the key to the bank that asked for it and to the client's new wallet. The client's balance does not "
+              + "move with it: that is a payment.",
+          List.of(new Field("request", "Pending request", "key-request"))));
 
   private final String rpcUrl;
   private final Path dataDir;
@@ -150,6 +184,17 @@ final class SimulatorService implements AutoCloseable {
     chains.put(rpcUrl, chain);
     chain.addListener(tx -> txLog.add(currentOperation.get(), nodeName(rpcUrl), tx));
     blocks.scheduleWithFixedDelay(this::pollBlock, 0, 1, TimeUnit.SECONDS);
+    // Key requests are found from events: the first read covers the whole chain, so make it now, not when a
+    // user first opens an operation that lists them.
+    Thread warm = new Thread(() -> {
+      try {
+        proposals();
+      } catch (Exception ignored) {
+        // read again when asked
+      }
+    }, "proposals-warm-up");
+    warm.setDaemon(true);
+    warm.start();
   }
 
   private boolean hasCode(String address) {
@@ -371,12 +416,14 @@ final class SimulatorService implements AutoCloseable {
     Operation spec = OPERATIONS.stream().filter(o -> o.id().equals(op)).findFirst()
         .orElseThrow(() -> new IllegalArgumentException("Unknown operation " + op));
     if (deployment == null) {
-      return new OpResult(op, false, "No Drex network deployed yet: run the demo setup or deploy first", null, null, List.of());
+      return new OpResult(op, false, "No Drex network deployed yet: run the demo setup or deploy first", null, null, List.of(),
+          null);
     }
     NodeDirectory.Node node = nodes.resolve(p.get("node"));
     currentOperation.set(spec.label());
     List<String> hashes = new ArrayList<>();
     Account signer = null;
+    String proposal = null;
     try {
       Chain chain = chainFor(node);
       DrexClient drex = new DrexClient(chain, deployment, null);
@@ -448,16 +495,53 @@ final class SimulatorService implements AutoCloseable {
           hashes.add(RealDigitalEnableAccount.load(deployment.realDigitalEnableAccount, chain.web3j(),
               chain.managerFor(signer), chain.gasProvider()).enableAccount(wallet(p, "wallet")).send().getTransactionHash());
         }
+        case "change-default" -> {
+          signer = account(p, "participant");
+          hashes.add(drex.changeDefaultWallet(signer, number(p, "cnpj8"), wallet(p, "wallet")).getTransactionHash());
+        }
+        case "swap2-start" -> {
+          signer = account(p, "from");
+          DrexClient.Proposed started = drex.startTwoStepPayment(signer, p.get("fromToken"), p.get("toToken"),
+              wallet(p, "to"), amount(p));
+          started.receipts().forEach(r -> hashes.add(r.getTransactionHash()));
+          proposal = started.proposalId() == null ? null : started.proposalId().toString();
+        }
+        case "swap2-accept" -> {
+          BigInteger id = number(p, "proposal");
+          DrexClient.SwapProposal pending = drex.swapProposal(id).orElseThrow(() -> new IllegalStateException(
+              "There is no two-step payment " + id + ", so nothing was sent"));
+          signer = known(pending.receiver(), "receiver of payment " + id);
+          hashes.add(drex.acceptTwoStepPayment(signer, id).getTransactionHash());
+        }
+        case "swap2-cancel" -> {
+          signer = account(p, "by");
+          drex.cancelTwoStepPayment(signer, number(p, "proposal"), p.get("reason"))
+              .forEach(r -> hashes.add(r.getTransactionHash()));
+        }
+        case "key-request" -> {
+          signer = tokenAuthority(p.get("token"));
+          DrexClient.Proposed requested = drex.requestKey(signer, p.get("token"), account(p, "client"), number(p, "cpf"),
+              BigInteger.ONE, BigInteger.ONE, BigInteger.ONE);
+          requested.receipts().forEach(r -> hashes.add(r.getTransactionHash()));
+          proposal = requested.proposalId() == null ? null : requested.proposalId().toString();
+        }
+        case "key-authorize" -> {
+          BigInteger id = number(p, "request");
+          DrexClient.KeyRequest request = drex.openKeyRequest(id);
+          signer = known(request.owner(), "bank that holds the key of request " + id);
+          hashes.add(drex.authorizeKey(signer, request).getTransactionHash());
+        }
         default -> throw new IllegalArgumentException("Unknown operation " + op);
       }
       // Balances are read from the primary node: let it catch up with the node that mined the operation,
       // so the refresh the browser makes on this event already shows its effect.
       awaitPrimary(chain.blockNumber());
       events.send("balances-changed", Map.of("operation", op));
-      return new OpResult(op, true, spec.label() + " done", signer == null ? null : signer.name(), node.name(), hashes);
+      return new OpResult(op, true, spec.label() + " done", signer == null ? null : signer.name(), node.name(), hashes,
+          proposal);
     } catch (Exception e) {
       return new OpResult(op, false, withNames(rootMessage(e)), signer == null ? null : signer.name(), node.name(),
-          hashes);
+          hashes, null);
     } finally {
       currentOperation.remove();
     }
@@ -465,6 +549,46 @@ final class SimulatorService implements AutoCloseable {
 
   private Account account(Map<String, String> p, String field) {
     return store.get(required(p, field));
+  }
+
+  /** The simulated account at {@code address}, which signs as {@code role}. */
+  private Account known(String address, String role) {
+    return store.byAddress(address).orElseThrow(() -> new IllegalStateException(
+        "The " + role + ", " + address + ", is not an account of this simulator, so it cannot sign here"));
+  }
+
+  // ------------------------------------------------------------------ proposals (flows 13 and 14)
+
+  record SwapProposalView(String id, String payer, String payerName, String receiver, String receiverName,
+      String fromToken, String toToken, BigInteger amount, String status, long expiresAt, boolean expired) {}
+
+  record KeyRequestView(String id, String cpf, String requester, String requesterName, String wallet,
+      String walletName, String owner, String ownerName, long expiresAt, boolean expired) {}
+
+  /** Pending SwapTwoSteps payments and open key requests, for the operations that act on them. */
+  Map<String, Object> proposals() throws Exception {
+    if (deployment == null) {
+      return Map.of("swaps", List.of(), "keys", List.of());
+    }
+    DrexClient drex = new DrexClient(chain, deployment, null);
+    long now = drex.blockTime();
+    List<SwapProposalView> swaps = drex.swapProposals().stream()
+        .filter(p -> p.status() == DrexClient.SwapProposal.Status.PENDING)
+        .map(p -> new SwapProposalView(p.id().toString(), p.sender(), name(p.sender()), p.receiver(), name(p.receiver()),
+            drex.symbolAt(p.tokenSender()), drex.symbolAt(p.tokenReceiver()), p.amount(), p.status().name(),
+            p.expiresAt(), p.expiredAt(now)))
+        .toList();
+    List<KeyRequestView> keys = drex.keyRequests().stream()
+        .map(r -> new KeyRequestView(r.id().toString(), r.cpf() == null ? null : r.cpf().toString(), r.requester(),
+            name(r.requester()), r.wallet(), name(r.wallet()), r.owner(), name(r.owner()), r.expiresAt(),
+            r.expiredAt(now)))
+        .toList();
+    return Map.of("now", now, "swaps", swaps, "keys", keys);
+  }
+
+  /** The name of the simulated account at {@code address}, or null. */
+  private String name(String address) {
+    return address == null ? null : store.byAddress(address).map(Account::name).orElse(null);
   }
 
   /** An account name or a 0x address. */

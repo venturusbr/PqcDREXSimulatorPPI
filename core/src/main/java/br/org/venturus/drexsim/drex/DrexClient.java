@@ -51,6 +51,7 @@ public final class DrexClient {
     DrexDeployment d = new DrexDeployment();
     d.chainId = chain.chainId();
     d.authority = bcb.address();
+    d.deployedAt = chain.blockNumber();
 
     out.accept("Deploying RealDigital");
     RealDigital rd = RealDigital.deploy(chain.web3j(), tm, gas, "Real Digital", "BRL", bcb.address(), bcb.address()).send();
@@ -368,7 +369,8 @@ public final class DrexClient {
       throws Exception {
     log.accept("Swap " + Amounts.format(amount) + " " + fromSymbol + " -> " + toSymbol + " from " + payer.name());
     RealTokenizado from = realTokenizado(fromSymbol, payer);
-    checkSwap(payer, from, fromSymbol, realTokenizado(toSymbol, payer), toSymbol, amount);
+    checkSwap(payer, payer.address(), payer.name(), from, fromSymbol, realTokenizado(toSymbol, payer), toSymbol, receiver,
+        amount);
     BigInteger allowance = from.allowance(payer.address(), deployment.swapOneStep).send();
     boolean approved = allowance.compareTo(amount) < 0;
     if (approved) {
@@ -405,17 +407,451 @@ public final class DrexClient {
     return e instanceof java.io.IOException;
   }
 
+  // ---------------------------------------------------------------- flow 3
+
+  /**
+   * Flow 3: the current default wallet of a CNPJ8 hands that role to another wallet. The contract only
+   * checks that the caller is the current default wallet; the new one must also be enabled in Real
+   * Digital (flow 2) to operate, so a wallet that is not is refused before sending.
+   */
+  public TransactionReceipt changeDefaultWallet(Account current, BigInteger cnpj8, String newWallet) throws Exception {
+    log.accept("Changing the default wallet of CNPJ8 " + cnpj8 + " to " + newWallet);
+    RealDigitalDefaultAccount defaults = RealDigitalDefaultAccount.load(deployment.realDigitalDefaultAccount,
+        chain.web3j(), chain.managerFor(current), chain.gasProvider());
+    String recorded = defaults.defaultAccount(cnpj8).send();
+    if (isZero(recorded)) {
+      throw new IllegalStateException(String.format(
+          "CNPJ8 %s has no default wallet: onboard its participant first (flow 1), so nothing was sent", cnpj8));
+    }
+    if (!recorded.equalsIgnoreCase(current.address())) {
+      throw new IllegalStateException(String.format(
+          "Must be current default account: the default wallet of CNPJ8 %s is %s, not %s, so nothing was sent",
+          cnpj8, recorded, current.address()));
+    }
+    if (recorded.equalsIgnoreCase(newWallet)) {
+      throw new IllegalStateException(String.format(
+          "%s is already the default wallet of CNPJ8 %s, so nothing was sent", newWallet, cnpj8));
+    }
+    RealDigital rd = realDigital(current);
+    if (!rd.verifyAccount(current.address()).send()) {
+      throw new IllegalStateException(String.format(
+          "Must be participant: %s is not enabled in Real Digital, so nothing was sent", current.address()));
+    }
+    if (!rd.verifyAccount(newWallet).send()) {
+      throw new IllegalStateException(String.format(
+          "%s is not enabled in Real Digital: enable it first (flow 2), so that it can operate as the default "
+              + "wallet. Nothing was sent", newWallet));
+    }
+    return defaults.updateDefaultWallet(cnpj8, newWallet).send();
+  }
+
+  // ---------------------------------------------------------------- flow 13
+
+  /** How long SwapTwoSteps and KeyDictionary proposals can be accepted: 7 days. */
+  public static final long PROPOSAL_LIFETIME_SECONDS = 7L * 24 * 3600;
+
+  /** A SwapTwoSteps proposal, as {@code swapProposals(id)} returns it. */
+  public record SwapProposal(BigInteger id, String tokenSender, String tokenReceiver, String sender, String receiver,
+      BigInteger amount, Status status, long timestamp) {
+
+    public enum Status { PENDING, EXECUTED, CANCELLED }
+
+    public long expiresAt() {
+      return timestamp + PROPOSAL_LIFETIME_SECONDS;
+    }
+
+    /** Whether the contract refuses to execute it at block time {@code now}. */
+    public boolean expiredAt(long now) {
+      return now >= expiresAt();
+    }
+  }
+
+  /** A proposal and the receipts of the transactions sent to make it, in order. */
+  public record Proposed(BigInteger proposalId, List<TransactionReceipt> receipts) {}
+
+  /** A SwapTwoSteps proposal, or empty if there is none with that id. */
+  public java.util.Optional<SwapProposal> swapProposal(BigInteger id) throws Exception {
+    var t = SwapTwoSteps.load(deployment.swapTwoSteps, chain.web3j(), chain.readOnly(), chain.gasProvider())
+        .swapProposals(id).send();
+    if (isZero(t.component3())) {
+      return java.util.Optional.empty();
+    }
+    return java.util.Optional.of(new SwapProposal(id, t.component1(), t.component2(), t.component3(), t.component4(),
+        t.component5(), SwapProposal.Status.values()[t.component6().intValueExact()], t.component7().longValueExact()));
+  }
+
+  /**
+   * Executed and cancelled proposals, which never change again, per chain (its genesis block) and SwapTwoSteps
+   * contract, by id.
+   */
+  private static final java.util.Map<String, java.util.Map<BigInteger, SwapProposal>> FINISHED =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+  /**
+   * Every SwapTwoSteps proposal, oldest first. The contract keeps its counter private, but numbers them from 1
+   * with no gaps, so they are read until the first empty one. Finished proposals are read once: only the
+   * pending ones and the first empty id are read each time.
+   */
+  public List<SwapProposal> swapProposals() throws Exception {
+    String contract = EventLogs.genesis(chain.web3j()) + "/" + deployment.swapTwoSteps.toLowerCase();
+    var finished = FINISHED.computeIfAbsent(contract, k -> new java.util.concurrent.ConcurrentHashMap<>());
+    List<SwapProposal> all = new java.util.ArrayList<>();
+    for (BigInteger id = BigInteger.ONE; ; id = id.add(BigInteger.ONE)) {
+      SwapProposal known = finished.get(id);
+      if (known != null) {
+        all.add(known);
+        continue;
+      }
+      var p = swapProposal(id);
+      if (p.isEmpty()) {
+        return all;
+      }
+      if (p.get().status() != SwapProposal.Status.PENDING) {
+        finished.put(id, p.get());
+      }
+      all.add(p.get());
+    }
+  }
+
+  /** Time of the latest block, in seconds: the contracts compare proposals' times with it. */
+  public long blockTime() throws java.io.IOException {
+    return chain.web3j().ethGetBlockByNumber(org.web3j.protocol.core.DefaultBlockParameterName.LATEST, false).send()
+        .getBlock().getTimestamp().longValueExact();
+  }
+
+  /**
+   * What {@code sender}'s pending proposals that can still be executed will burn of the token at {@code
+   * tokenAddress}: the allowance SwapTwoSteps needs over that token.
+   */
+  static BigInteger pendingAmount(List<SwapProposal> proposals, long now, String sender, String tokenAddress) {
+    return proposals.stream()
+        .filter(p -> p.status() == SwapProposal.Status.PENDING && !p.expiredAt(now))
+        .filter(p -> p.sender().equalsIgnoreCase(sender) && p.tokenSender().equalsIgnoreCase(tokenAddress))
+        .map(SwapProposal::amount).reduce(BigInteger.ZERO, BigInteger::add);
+  }
+
+  /**
+   * Flow 13, step 1: the payer proposes a payment to a client of another bank; nothing moves until the
+   * receiver accepts it. SwapTwoSteps' {@code startSwap} checks nothing, so what would make the acceptance
+   * fail is checked now, as for a one-step payment. The payer's allowance to SwapTwoSteps must cover this
+   * payment and its other pending ones from the same token, since accepting any of them burns from it: it is
+   * raised to that total only if it is lower.
+   */
+  public Proposed startTwoStepPayment(Account payer, String fromSymbol, String toSymbol, String receiver, BigInteger amount)
+      throws Exception {
+    log.accept("Two-step payment of " + Amounts.format(amount) + " " + fromSymbol + " -> " + toSymbol + " from "
+        + payer.name());
+    RealTokenizado from = realTokenizado(fromSymbol, payer);
+    checkSwap(payer, payer.address(), payer.name(), from, fromSymbol, realTokenizado(toSymbol, payer), toSymbol, receiver,
+        amount);
+    String fromAddress = token(fromSymbol).address();
+    BigInteger allowance = from.allowance(payer.address(), deployment.swapTwoSteps).send();
+    BigInteger needed = pendingAmount(swapProposals(), blockTime(), payer.address(), fromAddress).add(amount);
+    List<TransactionReceipt> receipts = new java.util.ArrayList<>();
+    boolean approved = allowance.compareTo(needed) < 0;
+    if (approved) {
+      receipts.add(from.approve(deployment.swapTwoSteps, needed).send());
+    }
+    try {
+      TransactionReceipt started = swapTwoSteps(payer)
+          .startSwap(fromAddress, token(toSymbol).address(), receiver, amount).send();
+      receipts.add(started);
+      List<SwapTwoSteps.SwapStartedEventResponse> events = SwapTwoSteps.getSwapStartedEvents(started);
+      return new Proposed(events.isEmpty() ? null : events.get(0).proposalId, receipts);
+    } catch (Exception e) {
+      if (approved && !mayStillBeIncluded(e)) {
+        log.accept("Proposal refused: setting the allowance of SwapTwoSteps back to " + Amounts.format(allowance));
+        try {
+          from.approve(deployment.swapTwoSteps, allowance).send();
+        } catch (Exception undo) {
+          e.addSuppressed(undo);
+        }
+      }
+      throw e;
+    }
+  }
+
+  /** A pending proposal, or a refusal that says why it cannot be acted on. */
+  private SwapProposal pendingProposal(BigInteger id) throws Exception {
+    SwapProposal p = swapProposal(id).orElseThrow(() -> new IllegalStateException(
+        "There is no two-step payment " + id + ", so nothing was sent"));
+    if (p.status() != SwapProposal.Status.PENDING) {
+      throw new IllegalStateException(String.format("Two-step payment %s was already %s, so nothing was sent", id,
+          p.status().name().toLowerCase()));
+    }
+    return p;
+  }
+
+  /**
+   * Flow 13, step 2: the receiver accepts a proposal, which burns the payer's Real Tokenizado, moves Real
+   * Digital between the reserves and mints the receiver's. Days may have passed since the proposal, so the
+   * payer's balance and allowance and the reserve are checked again, before sending.
+   */
+  public TransactionReceipt acceptTwoStepPayment(Account receiver, BigInteger id) throws Exception {
+    log.accept("Accepting two-step payment " + id + " as " + receiver.name());
+    SwapProposal p = pendingProposal(id);
+    if (!p.receiver().equalsIgnoreCase(receiver.address())) {
+      throw new IllegalStateException(String.format(
+          "Only the receiver can execute the swap: payment %s goes to %s, not %s, so nothing was sent", id, p.receiver(),
+          receiver.address()));
+    }
+    if (p.expiredAt(blockTime())) {
+      throw new IllegalStateException(String.format("Proposal expired: payment %s could be accepted until %s, so "
+          + "nothing was sent", id, java.time.Instant.ofEpochSecond(p.expiresAt())));
+    }
+    RealTokenizado from = rtAt(p.tokenSender(), receiver);
+    checkSwap(receiver, p.sender(), p.sender(), from, symbolAt(p.tokenSender()), rtAt(p.tokenReceiver(), receiver),
+        symbolAt(p.tokenReceiver()), p.receiver(), p.amount());
+    BigInteger allowance = from.allowance(p.sender(), deployment.swapTwoSteps).send();
+    if (allowance.compareTo(p.amount()) < 0) {
+      throw new IllegalStateException(String.format(
+          "ERC20: insufficient allowance: the payer %s lets SwapTwoSteps burn %s %s, and the payment is %s. The payer "
+              + "must approve it again, so nothing was sent", p.sender(), Amounts.format(allowance),
+          symbolAt(p.tokenSender()), Amounts.format(p.amount())));
+    }
+    return swapTwoSteps(receiver).executeSwap(id).send();
+  }
+
+  /**
+   * Flow 13, step 2 instead: the payer or the receiver cancels a pending proposal. When the payer cancels, the
+   * share of its allowance to SwapTwoSteps that the payment needed is withdrawn, down to what its other
+   * pending payments still need. The receiver cannot change the payer's allowance, so it stays.
+   *
+   * @return the receipts of the transactions sent, in order
+   */
+  public List<TransactionReceipt> cancelTwoStepPayment(Account by, BigInteger id, String reason) throws Exception {
+    log.accept("Cancelling two-step payment " + id + " as " + by.name());
+    SwapProposal p = pendingProposal(id);
+    boolean payer = p.sender().equalsIgnoreCase(by.address());
+    if (!payer && !p.receiver().equalsIgnoreCase(by.address())) {
+      throw new IllegalStateException(String.format(
+          "Only the sender or receiver can cancel the swap: payment %s is from %s to %s, so nothing was sent", id,
+          p.sender(), p.receiver()));
+    }
+    List<TransactionReceipt> receipts = new java.util.ArrayList<>();
+    receipts.add(swapTwoSteps(by).cancelSwap(id, reason == null ? "" : reason.trim()).send());
+    if (payer) {
+      RealTokenizado from = rtAt(p.tokenSender(), by);
+      BigInteger allowance = from.allowance(by.address(), deployment.swapTwoSteps).send();
+      BigInteger stillNeeded = pendingAmount(swapProposals(), blockTime(), by.address(), p.tokenSender());
+      BigInteger lowered = allowance.subtract(p.amount()).max(stillNeeded);
+      if (lowered.compareTo(allowance) < 0) {
+        try {
+          receipts.add(from.approve(deployment.swapTwoSteps, lowered).send());
+        } catch (Exception e) {
+          throw new IllegalStateException(String.format(
+              "Two-step payment %s was cancelled, but the allowance of SwapTwoSteps over %s stays at %s: lowering it "
+                  + "to %s failed: %s", id, symbolAt(p.tokenSender()), Amounts.format(allowance),
+              Amounts.format(lowered), e.getMessage()), e);
+        }
+      }
+    }
+    return receipts;
+  }
+
+  // ---------------------------------------------------------------- flow 14
+
+  /**
+   * A KeyDictionary key request that is still open: the key's current owner is not the bank that asked.
+   * {@code cpf} and {@code wallet} are read from the request's transaction, and are null if it cannot be read.
+   */
+  public record KeyRequest(BigInteger id, byte[] key, BigInteger cpf, String requester, String wallet, long timestamp,
+      String owner) {
+
+    public long expiresAt() {
+      return timestamp + PROPOSAL_LIFETIME_SECONDS;
+    }
+
+    public boolean expiredAt(long now) {
+      return now >= expiresAt();
+    }
+  }
+
+  /**
+   * Open key requests, oldest first. KeyDictionary keeps them private, so they are found from the {@code
+   * KeyRequested} events; that event names the bank that asked, so the key's owner is read too. A request is
+   * open while its key's owner is not the bank that asked: once authorized, the owner is that bank.
+   *
+   * <p>The contract never closes a request, and has no event for an authorization, so a request authorized
+   * long ago looks open again once the key moves back. A request made before the current owner's own latest
+   * request for the key was made before the key last moved, so it is taken as closed: the contract would
+   * still accept it, and move the key again. The contract builds the id from the bank and the block time, so
+   * a later request with the same id replaces the earlier one, as it does in the contract.
+   */
+  public List<KeyRequest> keyRequests() throws Exception {
+    var web3j = chain.web3j();
+    KeyDictionary keys = KeyDictionary.load(deployment.keyDictionary, web3j, chain.readOnly(), chain.gasProvider());
+    List<Requested> events = new java.util.ArrayList<>();
+    for (var entry : EventLogs.of(web3j, deployment.keyDictionary, deployment.deployedAt,
+        org.web3j.abi.EventEncoder.encode(KeyDictionary.KEYREQUESTED_EVENT))) {
+      var event = KeyDictionary.getKeyRequestedEventFromLog(entry);
+      events.add(new Requested(event.proposalId, event.key, event.owner, entry));
+    }
+    java.util.Map<String, String> owners = new java.util.HashMap<>();
+    java.util.function.Function<byte[], String> ownerOf = key -> owners.computeIfAbsent(Numeric.toHexString(key), k -> {
+      try {
+        return keys.getCustomerData(key).send().owner;
+      } catch (Exception e) {
+        throw new IllegalStateException("Could not read the owner of key " + k + ": " + e.getMessage(), e);
+      }
+    });
+    List<KeyRequest> open = new java.util.ArrayList<>();
+    for (Requested event : stillOpen(events, ownerOf)) {
+      var entry = event.log();
+      long time = web3j.ethGetBlockByHash(entry.getBlockHash(), false).send().getBlock().getTimestamp().longValueExact();
+      BigInteger cpf = null;
+      String wallet = null;
+      try {
+        String input = web3j.ethGetTransactionByHash(entry.getTransactionHash()).send().getTransaction().orElseThrow().getInput();
+        var args = org.web3j.abi.FunctionReturnDecoder.decode(input.substring(10), REQUEST_KEY_ARGS);
+        cpf = (BigInteger) args.get(1).getValue();
+        wallet = (String) args.get(5).getValue();
+      } catch (Exception ignored) {
+        // shown without the CPF and the wallet
+      }
+      open.add(new KeyRequest(event.id(), event.key(), cpf, event.requester(), wallet, time, ownerOf.apply(event.key())));
+    }
+    return open;
+  }
+
+  /** A {@code KeyRequested} event: the request's id, key and the bank that asked, and its log. */
+  record Requested(BigInteger id, byte[] key, String requester, org.web3j.protocol.core.methods.response.Log log) {}
+
+  /**
+   * Of the requests, oldest first, those still open, given each key's current owner: see {@link #keyRequests}.
+   */
+  static List<Requested> stillOpen(List<Requested> events, java.util.function.Function<byte[], String> ownerOf) {
+    java.util.Map<BigInteger, Requested> byId = new java.util.LinkedHashMap<>();
+    for (Requested event : events) {
+      byId.remove(event.id());
+      if (ownerOf.apply(event.key()).equalsIgnoreCase(event.requester())) {
+        // The owner's own request: authorized, so the requests for this key made before it are over too.
+        byId.values().removeIf(r -> java.util.Arrays.equals(r.key(), event.key()));
+      } else {
+        byId.put(event.id(), event);
+      }
+    }
+    return List.copyOf(byId.values());
+  }
+
+  @SuppressWarnings({"unchecked", "rawtypes"})
+  private static final List<org.web3j.abi.TypeReference<org.web3j.abi.datatypes.Type>> REQUEST_KEY_ARGS =
+      (List) List.of(new org.web3j.abi.TypeReference<org.web3j.abi.datatypes.generated.Bytes32>() {},
+          new org.web3j.abi.TypeReference<org.web3j.abi.datatypes.generated.Uint256>() {},
+          new org.web3j.abi.TypeReference<org.web3j.abi.datatypes.generated.Uint256>() {},
+          new org.web3j.abi.TypeReference<org.web3j.abi.datatypes.generated.Uint256>() {},
+          new org.web3j.abi.TypeReference<org.web3j.abi.datatypes.generated.Uint256>() {},
+          new org.web3j.abi.TypeReference<org.web3j.abi.datatypes.Address>() {});
+
+  /**
+   * Flow 14, step 1: a bank asks for the key of a client that another bank registered, for the client's
+   * wallet at this bank, which is enabled in this bank's Real Tokenizado if it is not yet. Refused before
+   * sending: a CPF without a key, a key this bank already owns, a wallet registered under another CPF (the
+   * authorization would point that wallet to a second key), and a request this bank already has open.
+   */
+  public Proposed requestKey(Account bank, String symbol, Account wallet, BigInteger cpf, BigInteger bankNumber,
+      BigInteger accountNumber, BigInteger branch) throws Exception {
+    log.accept("Requesting the key of CPF " + cpf + " for " + wallet.name() + " at " + symbol);
+    KeyDictionary keys = keyDictionary(bank);
+    byte[] key = clientKey(cpf);
+    if (isZero(keys.getWallet(key).send())) {
+      throw new IllegalStateException(String.format(
+          "CPF %s has no key in KeyDictionary, so there is nothing to port: onboard the client instead (flow 8). "
+              + "Nothing was sent", cpf));
+    }
+    String owner = keys.getCustomerData(key).send().owner;
+    if (owner.equalsIgnoreCase(bank.address())) {
+      throw new IllegalStateException(String.format(
+          "Cannot request own key: CPF %s is already registered by %s, so nothing was sent", cpf, bank.address()));
+    }
+    if (!realDigital(bank).verifyAccount(bank.address()).send()) {
+      throw new IllegalStateException(String.format(
+          "Must be participant: %s is not enabled in Real Digital, so nothing was sent", bank.address()));
+    }
+    checkWalletKey(keys, wallet.address(), key);
+    long now = blockTime();
+    for (KeyRequest r : keyRequests()) {
+      if (r.requester().equalsIgnoreCase(bank.address()) && java.util.Arrays.equals(r.key(), key) && !r.expiredAt(now)) {
+        throw new IllegalStateException(String.format(
+            "%s already asked for the key of CPF %s: request %s waits for %s to authorize it, so nothing was sent",
+            bank.address(), cpf, r.id(), r.owner()));
+      }
+    }
+    RealTokenizado token = realTokenizado(symbol, bank);
+    List<TransactionReceipt> receipts = new java.util.ArrayList<>();
+    if (!token.verifyAccount(wallet.address()).send()) {
+      receipts.add(token.enableAccount(wallet.address()).send());
+    }
+    TransactionReceipt requested = keys.requestKey(key, cpf, bankNumber, accountNumber, branch, wallet.address()).send();
+    receipts.add(requested);
+    List<KeyDictionary.KeyRequestedEventResponse> events = KeyDictionary.getKeyRequestedEvents(requested);
+    return new Proposed(events.isEmpty() ? null : events.get(0).proposalId, receipts);
+  }
+
+  /** Refuses a wallet that KeyDictionary already maps to a key other than {@code key}. */
+  private static void checkWalletKey(KeyDictionary keys, String wallet, byte[] key) throws Exception {
+    byte[] walletKey = keys.getKey(wallet).send();
+    if (!isZero(walletKey) && !java.util.Arrays.equals(walletKey, key)) {
+      KeyDictionary.CustomerData registered = keys.getCustomerData(walletKey).send();
+      throw new IllegalStateException(String.format(
+          "%s is already registered under CPF %s, by participant %s, so nothing was sent", wallet, registered.taxId,
+          registered.owner));
+    }
+  }
+
+  /**
+   * Flow 14, step 2: the bank that owns a key authorizes another bank's request for it, which moves the key
+   * to the new wallet and bank. The client's balance does not move with it.
+   */
+  public TransactionReceipt authorizeKey(Account owner, BigInteger id) throws Exception {
+    return authorizeKey(owner, openKeyRequest(id));
+  }
+
+  /** The open key request {@code id}, or a refusal. */
+  public KeyRequest openKeyRequest(BigInteger id) throws Exception {
+    return keyRequests().stream().filter(k -> k.id().equals(id)).findFirst()
+        .orElseThrow(() -> new IllegalStateException(
+            "There is no open key request " + id + ": it does not exist or was already authorized, so nothing was sent"));
+  }
+
+  /** {@link #authorizeKey(Account, BigInteger)} for a request already read with {@link #openKeyRequest}. */
+  public TransactionReceipt authorizeKey(Account owner, KeyRequest r) throws Exception {
+    BigInteger id = r.id();
+    log.accept("Authorizing key request " + id + " as " + owner.name());
+    if (!r.owner().equalsIgnoreCase(owner.address())) {
+      throw new IllegalStateException(String.format(
+          "Only owner can authorize key transfer: the key of request %s is registered by %s, not %s, so nothing was sent",
+          id, r.owner(), owner.address()));
+    }
+    if (r.expiredAt(blockTime())) {
+      throw new IllegalStateException(String.format("Proposal expired: request %s could be authorized until %s, so "
+          + "nothing was sent", id, java.time.Instant.ofEpochSecond(r.expiresAt())));
+    }
+    if (!realDigital(owner).verifyAccount(owner.address()).send()) {
+      throw new IllegalStateException(String.format(
+          "Must be participant: %s is not enabled in Real Digital, so nothing was sent", owner.address()));
+    }
+    KeyDictionary keys = keyDictionary(owner);
+    if (r.wallet() != null) {
+      checkWalletKey(keys, r.wallet(), r.key());
+    }
+    return keys.authorizeKey(id, r.key()).send();
+  }
+
+  // ---------------------------------------------------------------- checks
+
   /**
    * Refuses, before any transaction, a swap that the contracts would refuse for a reason the payer can see:
-   * a paused token, too little balance once frozen funds are set aside, or a bank reserve without the
-   * Real Digital to move. Messages start like the contracts' own.
+   * a paused token, a payer or receiver not enabled in its token, too little balance once frozen funds are
+   * set aside, or a bank reserve without the Real Digital to move. Messages start like the contracts' own.
+   * {@code reader} only reads; {@code payer} and {@code receiver} are addresses.
    */
-  private void checkSwap(Account payer, RealTokenizado from, String fromSymbol, RealTokenizado to, String toSymbol,
-      BigInteger amount) throws Exception {
+  private void checkSwap(Account reader, String payer, String payerName, RealTokenizado from, String fromSymbol,
+      RealTokenizado to, String toSymbol, String receiver, BigInteger amount) throws Exception {
     if (amount.signum() <= 0) {
       throw new IllegalArgumentException("The amount must be positive, not " + Amounts.format(amount));
     }
-    RealDigital rd = realDigital(payer);
+    RealDigital rd = realDigital(reader);
     if (from.paused().send()) {
       throw new IllegalStateException("Pausable: paused (" + fromSymbol + " is paused)");
     }
@@ -425,13 +861,20 @@ public final class DrexClient {
     if (rd.paused().send()) {
       throw new IllegalStateException("Pausable: paused (Real Digital is paused)");
     }
-    BigInteger balance = from.balanceOf(payer.address()).send();
-    BigInteger frozen = from.frozenBalanceOf(payer.address()).send();
+    // RealTokenizado's checkAccess: burning needs the holder enabled, minting the receiver.
+    if (!from.verifyAccount(payer).send()) {
+      throw new IllegalStateException("Sender is not enabled (" + payerName + " is not enabled in " + fromSymbol + ")");
+    }
+    if (!to.verifyAccount(receiver).send()) {
+      throw new IllegalStateException("Recipient is not enabled (" + receiver + " is not enabled in " + toSymbol + ")");
+    }
+    BigInteger balance = from.balanceOf(payer).send();
+    BigInteger frozen = from.frozenBalanceOf(payer).send();
     BigInteger available = balance.subtract(frozen).max(BigInteger.ZERO);
     if (available.compareTo(amount) < 0) {
       throw new IllegalStateException(String.format(
           "RealDigital: insufficient balance (%s has %s %s available, %s of %s frozen; the payment is %s)",
-          payer.name(), Amounts.format(available), fromSymbol, Amounts.format(frozen), Amounts.format(balance),
+          payerName, Amounts.format(available), fromSymbol, Amounts.format(frozen), Amounts.format(balance),
           Amounts.format(amount)));
     }
     String reserve = from.reserve().send();
@@ -455,6 +898,21 @@ public final class DrexClient {
 
   public KeyDictionary keyDictionary(Account as) {
     return KeyDictionary.load(deployment.keyDictionary, chain.web3j(), chain.managerFor(as), chain.gasProvider());
+  }
+
+  public SwapTwoSteps swapTwoSteps(Account as) {
+    return SwapTwoSteps.load(deployment.swapTwoSteps, chain.web3j(), chain.managerFor(as), chain.gasProvider());
+  }
+
+  /** The Real Tokenizado at {@code address}, known to the deployment or not. */
+  private RealTokenizado rtAt(String address, Account as) {
+    return RealTokenizado.load(address, chain.web3j(), chain.managerFor(as), chain.gasProvider());
+  }
+
+  /** The symbol of the Real Tokenizado at {@code address}, or the address if the deployment does not know it. */
+  public String symbolAt(String address) {
+    return deployment.realTokenizados.stream().filter(t -> t.address().equalsIgnoreCase(address))
+        .map(DrexDeployment.Tokenized::symbol).findFirst().orElse(address);
   }
 
   private DrexDeployment.Tokenized token(String symbol) {
