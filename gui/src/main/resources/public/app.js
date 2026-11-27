@@ -669,7 +669,68 @@ function setWallet(form, name, value) {
   if (useOther && value !== OTHER_WALLET) other.value = value;
 }
 
+// ------------------------------------------------------------------ proposals (flows 13 and 14)
+
+/** Field types whose options are pending two-step payments or open key requests. */
+const PROPOSAL_FIELDS = ['swap-proposal', 'key-request'];
+
+const usesProposals = (op) => !!op && op.fields.some((f) => PROPOSAL_FIELDS.includes(f.type));
+
+/** Reads the pending payments and key requests, then redraws the form if the operation shown lists them. */
+async function refreshProposals() {
+  try {
+    state.proposals = await api('/api/proposals');
+  } catch (err) {
+    state.proposals = { now: 0, swaps: [], keys: [] };
+    toast(tr('common.failed', { error: err.message }));
+  }
+  if (usesProposals(state.operations.find((o) => o.id === $('#op-select').value))) renderOperationForm();
+}
+
+/** Time left to act on a proposal, by the chain's clock. */
+function timeLeft(expiresAt) {
+  const left = expiresAt - (state.proposals?.now || 0);
+  if (left <= 0) return tr('op.expired');
+  return tr('op.time-left', { d: Math.floor(left / 86400), h: Math.floor((left % 86400) / 3600) });
+}
+
+const accountName = (name, address) => name || shortAddr(address);
+
+/** A proposal id: SwapTwoSteps numbers them, KeyDictionary hashes them into 78-digit numbers. */
+const proposalId = (id) => (id.length > 10 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id);
+
+/** Pending payments: Accept offers only those that can still be executed, Cancel every pending one. */
+function swapOptionsHtml(op) {
+  if (!state.proposals) return `<option value="" disabled selected>${tr('op.loading')}</option>`;
+  const swaps = state.proposals.swaps.filter((s) => op.id !== 'swap2-accept' || !s.expired);
+  if (!swaps.length) return `<option value="" disabled selected>${tr('op.no-pending-payment')}</option>`;
+  return swaps.map((s) => `<option value="${esc(s.id)}">#${esc(s.id)} · ${esc(accountName(s.payerName, s.payer))} → ${esc(accountName(s.receiverName, s.receiver))} · ${esc(money(s.amount))} ${esc(shortAddr(s.fromToken))} → ${esc(shortAddr(s.toToken))} · ${esc(timeLeft(s.expiresAt))}</option>`).join('');
+}
+
+/** Key requests that can still be authorized. */
+function keyRequestOptionsHtml() {
+  if (!state.proposals) return `<option value="" disabled selected>${tr('op.loading')}</option>`;
+  const keys = state.proposals.keys.filter((k) => !k.expired);
+  if (!keys.length) return `<option value="" disabled selected>${tr('op.no-pending-request')}</option>`;
+  return keys.map((k) => `<option value="${esc(k.id)}">#${esc(proposalId(k.id))} · ${k.cpf ? `CPF ${esc(k.cpf)} · ` : ''}${esc(accountName(k.ownerName, k.owner))} → ${esc(accountName(k.requesterName, k.requester))}${k.wallet ? ` (${esc(accountName(k.walletName, k.wallet))})` : ''} · ${esc(timeLeft(k.expiresAt))}</option>`).join('');
+}
+
+/** Who can cancel the chosen payment: its payer and its receiver, when they are accounts of this simulator. */
+function updateParty(form) {
+  const party = form.querySelector('select[data-party]');
+  if (!party) return;
+  const id = form.querySelector('select[data-proposal]')?.value;
+  const s = state.proposals?.swaps.find((x) => x.id === id);
+  const sides = s ? [s.payerName, s.receiverName].filter(Boolean) : [];
+  const keep = party.value;
+  party.innerHTML = sides.length
+    ? sides.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')
+    : `<option value="" disabled selected>${tr(s ? 'op.no-party' : 'op.no-pending-payment')}</option>`;
+  if (sides.includes(keep)) party.value = keep;
+}
+
 $('#op-form').addEventListener('change', (e) => {
+  if (e.target.matches('select[data-proposal]')) updateParty(e.currentTarget);
   updatePauseWarning();
   const name = e.target.dataset?.wallet;
   if (name) {
@@ -681,6 +742,7 @@ $('#op-form').addEventListener('change', (e) => {
 $('#op-select').addEventListener('change', () => {
   $('#op-result').classList.add('hidden');
   renderOperationForm();
+  if (usesProposals(state.operations.find((o) => o.id === $('#op-select').value))) refreshProposals();
 });
 
 function tokenSymbols(includeRd) {
@@ -703,12 +765,13 @@ function tokenOptionsHtml(op, f) {
 /**
  * Tokens each operation moves, so it reverts while any of them is paused. "@field" is the token chosen in
  * that field. A swap burns the payer's Real Tokenizado, moves Real Digital between the reserves and mints
- * the receiver's. Onboarding and enabling wallets are not blocked by a pause.
+ * the receiver's; proposing a two-step payment is refused while accepting it would revert. Onboarding and
+ * enabling wallets are not blocked by a pause.
  */
 const PAUSE_BLOCKS = {
   'str-mint': ['BRL'], 'str-burn': ['BRL'], 'rd-transfer': ['BRL'],
   deposit: ['@token'], withdraw: ['@token'], 'rt-transfer': ['@token'],
-  swap: ['@fromToken', '@toToken', 'BRL'],
+  swap: ['@fromToken', '@toToken', 'BRL'], 'swap2-start': ['@fromToken', '@toToken', 'BRL'],
   freeze: ['@token'], unfreeze: ['@token'], 'forced-transfer': ['@token'],
 };
 
@@ -755,6 +818,18 @@ function renderOperationForm() {
       case 'number':
         input = `<input name="${f.name}" required inputmode="numeric">`;
         break;
+      case 'note':
+        input = `<input name="${f.name}" maxlength="200" placeholder="${esc(tr('op.reason-placeholder'))}">`;
+        break;
+      case 'swap-proposal':
+        input = `<select name="${f.name}" required data-proposal>${swapOptionsHtml(op)}</select>`;
+        break;
+      case 'key-request':
+        input = `<select name="${f.name}" required>${keyRequestOptionsHtml()}</select>`;
+        break;
+      case 'party':
+        input = `<select name="${f.name}" required data-party></select>`;
+        break;
       default:
         input = `<input name="${f.name}" required>`;
     }
@@ -767,6 +842,12 @@ function renderOperationForm() {
 
   form.innerHTML = `${fields}${nodeField}<div class="op-warning hidden" id="op-pause-warning" role="status"></div>
     <button class="primary" type="submit">${tr('op.submit')}</button>`;
+  // The party select depends on the proposal: fill it before the previous values are put back.
+  const proposalSelect = form.querySelector('select[data-proposal]');
+  if (proposalSelect && previous.proposal && [...proposalSelect.options].some((o) => o.value === previous.proposal)) {
+    proposalSelect.value = previous.proposal;
+  }
+  updateParty(form);
   for (const [k, v] of Object.entries(previous)) {
     const wallet = form.querySelector(`select[data-wallet="${k}"]`);
     if (wallet) setWallet(form, k, v);
@@ -785,7 +866,7 @@ function renderOperationForm() {
     if (other) form.elements.to.value = other.name;
   }
   // A payment to another bank goes between two different Real Tokenizados.
-  if (op.id === 'swap' && form.elements.fromToken.value === form.elements.toToken.value) {
+  if ((op.id === 'swap' || op.id === 'swap2-start') && form.elements.fromToken.value === form.elements.toToken.value) {
     const other = tokenSymbols(false).find((s) => s !== form.elements.fromToken.value);
     if (other) form.elements.toToken.value = other;
   }
@@ -808,9 +889,12 @@ $('#op-form').addEventListener('submit', async (e) => {
     const spec = state.operations.find((o) => o.id === op);
     out.innerHTML = r.ok
       ? `${esc(spec ? tr('op.done', { op: opLabel(spec) }) : r.message)}${r.signer ? tr('op.result-signed-by', { who: `<b>${esc(r.signer)}</b>` }) : ''}${r.node ? tr('op.result-via', { node: esc(r.node) }) : ''}.${(r.transactions || [])
-        .map((h) => ` <button class="link" data-details="${esc(h)}" title="${tr('op.show-details')}">${esc(shortAddr(h))}</button>`).join('')}`
+        .map((h) => ` <button class="link" data-details="${esc(h)}" title="${tr('op.show-details')}">${esc(shortAddr(h))}</button>`).join('')}${r.proposal
+        ? `<span title="${esc(r.proposal)}">${esc(tr('op.proposal-made', { id: `#${proposalId(r.proposal)}` }))}</span>` : ''}`
       : tr('common.failed', { error: esc(r.message) });
     refreshBalances();
+    // Proposals change with their own operations: the lists of the next ones must show it.
+    if (r.ok && (r.proposal || usesProposals(spec))) refreshProposals();
   } catch (err) {
     out.className = 'op-result err';
     out.textContent = tr('common.failed', { error: err.message });

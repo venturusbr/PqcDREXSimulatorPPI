@@ -11,7 +11,8 @@ import org.junit.jupiter.api.Test;
 
 class OperationsTest {
 
-  private static final Set<String> FIELD_TYPES = Set.of("account", "wallet", "token", "rt", "amount", "text", "number");
+  private static final Set<String> FIELD_TYPES = Set.of("account", "wallet", "token", "rt", "amount", "text", "note", "number",
+      "swap-proposal", "party", "key-request");
 
   @Test
   void everyOperationHasAUniqueIdAFlowAndKnownFieldTypes() {
@@ -26,9 +27,9 @@ class OperationsTest {
   }
 
   @Test
-  void coversTheClientFacingFlows() {
+  void coversEveryFlowAUserRuns() {
     List<Integer> flows = SimulatorService.OPERATIONS.stream().map(SimulatorService.Operation::flow).toList();
-    for (int flow : List.of(4, 5, 6, 9, 10, 11, 12, 15, 16, 17)) {
+    for (int flow : List.of(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17)) {
       assertTrue(flows.contains(flow), "flow " + flow + " has an operation");
     }
   }
@@ -49,6 +50,6 @@ class OperationsTest {
     assertNotNull(getClass().getResource("/public/i18n/en-US.json"));
     assertNotNull(getClass().getResource("/public/logo.svg"));
     assertNotNull(getClass().getResource("/public/favicon.ico"));
-    assertEquals(16, SimulatorService.OPERATIONS.size());
+    assertEquals(22, SimulatorService.OPERATIONS.size());
   }
 }

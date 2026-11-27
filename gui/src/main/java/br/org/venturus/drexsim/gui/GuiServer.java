@@ -25,6 +25,7 @@ import picocli.CommandLine.Option;
  * GET  /api/balances                RD and RT balances of every account, at one block
  * GET  /api/operations              operations offered, with their form fields
  * POST /api/operations/{id}         runs one, signed by the account its flow names, sent to params.node
+ * GET  /api/proposals               pending two-step payments (flow 13) and open key requests (flow 14)
  * GET  /api/transactions            transactions sent from the GUI, with receipts
  * GET  /api/transactions/{hash}     eth_getTransactionByHash and eth_getTransactionReceipt (?node=node-2)
  * GET  /api/nodes                   every node and its status   POST /api/nodes/rescan
@@ -126,6 +127,7 @@ public final class GuiServer implements Callable<Integer> {
     app.get("/api/balances", ctx -> service.balances().ifPresentOrElse(ctx::json,
         () -> ctx.status(HttpStatus.NOT_FOUND).json(Map.of("error", "No Drex network deployed yet"))));
     app.get("/api/operations", ctx -> ctx.json(SimulatorService.OPERATIONS));
+    app.get("/api/proposals", ctx -> ctx.json(service.proposals()));
     app.post("/api/operations/{id}", ctx -> {
       @SuppressWarnings("unchecked")
       Map<String, String> params = ctx.body().isBlank() ? Map.of() : json.readValue(ctx.body(), Map.class);
